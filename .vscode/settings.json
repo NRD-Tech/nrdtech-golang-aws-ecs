@@ -1,0 +1,7 @@
+{
+    // Window Settings
+    "window.title": "${rootName}",
+
+    // Line Ending Configuration
+    "files.eol": "\n",
+}
