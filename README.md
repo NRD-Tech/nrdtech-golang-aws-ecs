@@ -57,6 +57,8 @@ git commit -m 'init'
     * LAUNCH_TYPE
       * Specify one of these launch types: EC2, FARGATE, or FARGATE_SPOT
       * Note that for the EC2 option to work you must choose an ECS Cluster that has an EC2 Capacity Provider
+* Edit go.mod
+  * Set an appropriate module name (likely the same as APP_IDENT_WITHOUT_ENV)
 * Choose how your Task will be triggered
   * Event Bridge Scheduling:
     * Un-comment terraform/main/ecs_eventbridge.tf
