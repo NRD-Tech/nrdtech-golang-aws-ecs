@@ -28,5 +28,8 @@ RUN apk --no-cache add ca-certificates
 # Copy the statically linked binary from the builder
 COPY --from=builder /main /main
 
+# Expose port
+EXPOSE 8080
+
 # Set the binary as the container's entry point
 ENTRYPOINT ["/main"]
