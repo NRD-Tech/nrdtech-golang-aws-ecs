@@ -67,7 +67,6 @@ git commit -m 'init'
   * ECS Service (always-on running service with 1+ tasks)
     * Un-comment terraform/main/ecs_service.tf
     * Edit app/main.go to enable the appropriate section
-    * Edit Dockerfile at the bottom to start your service correctly
     * Install Fiber dependencies: `go get github.com/gofiber/fiber/v2`
     
 * Commit your changes to git
