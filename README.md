@@ -68,7 +68,8 @@ git commit -m 'init'
     * Un-comment terraform/main/ecs_service.tf
     * Edit app/main.go to enable the appropriate section
     * Install Fiber dependencies: `go get github.com/gofiber/fiber/v2`
-    
+* Choose which VPC to use, specify that vpc in `terraform/main/main.tf`
+
 * Commit your changes to git
 ```
 git add .
