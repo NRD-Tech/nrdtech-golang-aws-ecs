@@ -1,12 +1,15 @@
 resource "aws_ecs_task_definition" "task_definition" {
   depends_on = [aws_cloudwatch_log_group.log_group, null_resource.push_image]
-  family                   = var.app_ident
+  family                   = var.APP_IDENT
   network_mode             = "awsvpc"
-  requires_compatibilities = [var.launch_type == "FARGATE_SPOT" ? "FARGATE" : var.launch_type]
-  cpu                      = var.app_cpu
-  memory                   = var.app_memory
+  requires_compatibilities = [var.LAUNCH_TYPE == "FARGATE_SPOT" ? "FARGATE" : var.LAUNCH_TYPE]
+  cpu                      = var.APP_CPU
+  memory                   = var.APP_MEMORY
   execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
   task_role_arn            = aws_iam_role.ecs_task_role.arn
+
+  # Add tags to ensure ECS tasks inherit the awsApplication tag for cost tracking
+  tags = data.terraform_remote_state.app_bootstrap.outputs.app_tags
 
   runtime_platform {
     # Options: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html#runtime-platform
@@ -14,35 +17,35 @@ resource "aws_ecs_task_definition" "task_definition" {
     operating_system_family = "LINUX"
 
     # Options: X86_64, ARM64
-    cpu_architecture        = var.cpu_architecture
+    cpu_architecture        = var.CPU_ARCHITECTURE
   }
 
   container_definitions = jsonencode([{
-    name      = var.app_ident
+    name      = var.APP_IDENT
     image     = "${aws_ecr_repository.ecr_repository.repository_url}:${null_resource.push_image.triggers.code_hash}"
-    cpu       = var.app_cpu
-    memory    = var.app_memory
+    cpu       = var.APP_CPU
+    memory    = var.APP_MEMORY
     portMappings = [{
       containerPort = 8080
       protocol      = "tcp"
     }]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        awslogs-group         = aws_cloudwatch_log_group.log_group.name
-        awslogs-region        = var.aws_region
-        awslogs-stream-prefix = "ecs"
-      }
-    }
-    environment = [
-        {
-          name = "ENVIRONMENT"
-          value = var.environment
-        },
-        {
-          name  = "AWS_REGION"
-          value = var.aws_region
+          logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.log_group.name
+          awslogs-region        = var.AWS_REGION
+          awslogs-stream-prefix = "ecs"
         }
-    ]
+      }
+      environment = [
+          {
+            name = "ENVIRONMENT"
+            value = var.ENVIRONMENT
+          },
+          {
+            name  = "AWS_REGION"
+            value = var.AWS_REGION
+          }
+      ]
   }])
 }

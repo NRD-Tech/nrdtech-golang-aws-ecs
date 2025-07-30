@@ -1,14 +1,14 @@
 # resource "aws_cloudwatch_event_rule" "ecs_rule" {
-#   # Must be no longer than 64 characters
-#   name                = "${var.app_ident}-ecs-rule"
+#   # Must be no longer than 64 characters  
+#   name                = "${var.APP_IDENT}-ecs-rule"
 #   schedule_expression = "cron(0 * * * ? *)"
 #
 #   # NOTE: All environments except prod are disabled by default here
-#   state = var.environment == "prod" ? "ENABLED" : "DISABLED"
+#   state = var.ENVIRONMENT == "prod" ? "ENABLED" : "DISABLED"
 # }
 
 # locals {
-#   ecs_target = var.launch_type == "FARGATE" ? {
+#   ecs_target = var.LAUNCH_TYPE == "FARGATE" ? {
 #     task_definition_arn        = aws_ecs_task_definition.task_definition.arn
 #     launch_type                = "FARGATE"
 #     capacity_provider_strategy = []
@@ -16,7 +16,7 @@
 #       subnets          = data.aws_subnets.public.ids
 #       assign_public_ip = true
 #     }
-#   } : var.launch_type == "FARGATE_SPOT" ? {
+#   } : var.LAUNCH_TYPE == "FARGATE_SPOT" ? {
 #     task_definition_arn        = aws_ecs_task_definition.task_definition.arn
 #     launch_type                = null
 #     capacity_provider_strategy = [{
@@ -38,7 +38,7 @@
 
 # resource "aws_cloudwatch_event_target" "ecs_target" {
 #   rule     = aws_cloudwatch_event_rule.ecs_rule.name
-#   arn      = var.ecs_cluster_arn
+#   arn      = aws_ecs_cluster.ecs.arn
 #   role_arn = aws_iam_role.execution_role.arn
 #   dead_letter_config {
 #     arn = aws_sqs_queue.eventbridge_rule_dlq.arn
@@ -71,11 +71,11 @@
 # }
 
 # resource "aws_sqs_queue" "eventbridge_rule_dlq" {
-#   name = "${var.app_ident}-eventbridge-rule-dlq"
+#   name = "${var.APP_IDENT}-eventbridge-rule-dlq"
 # }
 
 # resource "aws_iam_role" "execution_role" {
-#   name = "${var.app_ident}-target-execution-role"
+#   name = "${var.APP_IDENT}-target-execution-role"
 
 #   assume_role_policy = jsonencode({
 #     Version   = "2012-10-17",
@@ -92,7 +92,7 @@
 # }
 
 # resource "aws_iam_policy" "execution_role_policy" {
-#   name        = "${var.app_ident}-role-policy"
+#   name        = "${var.APP_IDENT}-role-policy"
 
 #   policy = jsonencode({
 #     Version   = "2012-10-17",

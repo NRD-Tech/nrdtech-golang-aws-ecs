@@ -2,9 +2,10 @@
 # Configuration
 #########################################################
 # Used to identify the application in AWS resources | allowed characters: a-zA-Z0-9-_
-# NOTE: This should always include the ENVIRONMENT
-# NOTE2: This must be no longer than 20 characters long
-export APP_IDENT_WITHOUT_ENV=my-test-project
+# NOTE: This must be no longer than 20 characters long
+export APP_IDENT_WITHOUT_ENV=tm-detail-import-v3
+export APP_IDENT="${APP_IDENT_WITHOUT_ENV}-${ENVIRONMENT}"
+export TERRAFORM_STATE_IDENT=$APP_IDENT
 
 # This is the AWS S3 bucket in which you are storing your terraform state files
 # - This must exist before deploying

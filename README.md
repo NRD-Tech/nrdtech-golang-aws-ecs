@@ -52,8 +52,6 @@ git commit -m 'init'
     * TERRAFORM_STATE_BUCKET
     * AWS_DEFAULT_REGION
     * AWS_ROLE_ARN
-    * ECS_CLUSTER_ARN
-      * Choose an existing ECS Cluster to use
     * LAUNCH_TYPE
       * Specify one of these launch types: EC2, FARGATE, or FARGATE_SPOT
       * Note that for the EC2 option to work you must choose an ECS Cluster that has an EC2 Capacity Provider
