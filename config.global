@@ -22,8 +22,6 @@ export AWS_WEB_IDENTITY_TOKEN_FILE=$(pwd)/web-identity-token
 export APP_CPU=256  # cpu
 export APP_MEMORY=512  # memory in MB
 
-export ECS_CLUSTER_ARN=arn:aws:ecs:us-west-2:1234567890:cluster/my-ecs-cluster-1
-
 # This is either EC2, FARGATE, or FARGATE_SPOT
 export LAUNCH_TYPE=FARGATE
 
