@@ -46,7 +46,7 @@ git commit -m 'init'
   * Terraform uses this to determine in which subnets to deploy the tasks
 
 ## Configure Settings
-* Edit .env.global
+* Edit config.global
   * Each config is a little different per application but at a minimum you will need to change:
     * APP_IDENT_WITHOUT_ENV
     * TERRAFORM_STATE_BUCKET
@@ -84,7 +84,7 @@ git commit -a -m 'updated config'
 ## (If using GitHub) Configure the AWS Role
 * Edit .github/workflows/main.yml
     * Set the pipeline role for role-to-assume
-      * This should be the same as the AWS_ROLE_ARN in your .env.global
+      * This should be the same as the AWS_ROLE_ARN in your config.global
     * Set the correct aws-region
 
 ## Deploy to Staging
