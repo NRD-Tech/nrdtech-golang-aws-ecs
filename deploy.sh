@@ -44,8 +44,8 @@ echo "FLAG_DESTROY: ${FLAG_DESTROY}"
 
 echo $BITBUCKET_STEP_OIDC_TOKEN > $(pwd)/web-identity-token
 
-source .env.global
-source ".env.${ENVIRONMENT}"
+source config.global
+source "config.${ENVIRONMENT}"
 
 #########################################################
 # Export all environment variables to Terraform
