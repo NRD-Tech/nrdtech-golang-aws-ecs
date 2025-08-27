@@ -10,4 +10,5 @@ export API_ROOT_DOMAIN=mycompany.com
 export API_DOMAIN=api-staging.mycompany.com
 
 # Number of tasks in an ECS Service
-export DESIRED_COUNT=1
+export MIN_COUNT=1
+export MAX_COUNT=2

@@ -37,16 +37,16 @@
 #     # network configuration depends on whether it's Fargate or not
 #     network_configuration = (
 #       var.LAUNCH_TYPE == "FARGATE" || var.LAUNCH_TYPE == "FARGATE_SPOT"
-#         ? {
-#             security_groups  = [aws_security_group.ecs_sg.id]
-#             subnets          = data.aws_subnets.public.ids
-#             assign_public_ip = true
-#           }
-#         : {
-#             security_groups = [aws_security_group.ecs_sg.id]
-#             subnets = data.aws_subnets.public.ids
-#             assign_public_ip = false
-#           }
+#       ? {
+#         security_groups  = [aws_security_group.ecs_sg.id]
+#         subnets          = data.aws_subnets.public.ids
+#         assign_public_ip = true
+#       }
+#       : {
+#         security_groups  = [aws_security_group.ecs_sg.id]
+#         subnets          = data.aws_subnets.public.ids
+#         assign_public_ip = false
+#       }
 #     )
 #   }
 # }
@@ -61,10 +61,10 @@
 
 # # ECS Service for background processing
 # resource "aws_ecs_service" "ecs_service" {
-#   name            = "${var.APP_IDENT}-service"
-#   cluster         = aws_ecs_cluster.ecs.arn
-#   task_definition = aws_ecs_task_definition.task_definition.arn
-#   desired_count   = var.DESIRED_COUNT
+#   name                               = "${var.APP_IDENT}-service"
+#   cluster                            = aws_ecs_cluster.ecs.arn
+#   task_definition                    = aws_ecs_task_definition.task_definition.arn
+#   desired_count                      = var.MIN_COUNT
 #   deployment_maximum_percent         = 200
 #   deployment_minimum_healthy_percent = 100
 
@@ -91,31 +91,32 @@
 
 #   lifecycle {
 #     create_before_destroy = true
+#     ignore_changes        = [desired_count]
 #   }
 # }
 
 # resource "aws_appautoscaling_target" "ecs_target" {
-#   max_capacity       = 2  # Configure this to something appropriate for your application
-#   min_capacity       = 1  # Configure this to something appropriate for your application
+#   max_capacity       = var.MAX_COUNT
+#   min_capacity       = var.MIN_COUNT
 #   resource_id        = "service/${local.cluster_name}/${aws_ecs_service.ecs_service.name}"
 #   scalable_dimension = "ecs:service:DesiredCount"
 #   service_namespace  = "ecs"
 # }
 
 # resource "aws_appautoscaling_policy" "scale_out" {
-#   name                   = "scale-out"
-#   service_namespace      = aws_appautoscaling_target.ecs_target.service_namespace
-#   resource_id            = aws_appautoscaling_target.ecs_target.resource_id
-#   scalable_dimension     = aws_appautoscaling_target.ecs_target.scalable_dimension
-#   policy_type            = "TargetTrackingScaling"
+#   name               = "scale-out"
+#   service_namespace  = aws_appautoscaling_target.ecs_target.service_namespace
+#   resource_id        = aws_appautoscaling_target.ecs_target.resource_id
+#   scalable_dimension = aws_appautoscaling_target.ecs_target.scalable_dimension
+#   policy_type        = "TargetTrackingScaling"
 
 #   target_tracking_scaling_policy_configuration {
-#     target_value       = 75.0
+#     target_value = 75.0
 #     predefined_metric_specification {
 #       predefined_metric_type = "ECSServiceAverageCPUUtilization"
 #     }
-#     scale_out_cooldown  = 60
-#     scale_in_cooldown   = 60
+#     scale_out_cooldown = 60
+#     scale_in_cooldown  = 60
 #   }
 # }
 

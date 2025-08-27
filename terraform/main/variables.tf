@@ -36,10 +36,16 @@ variable "APP_MEMORY" {
   type        = number
 }
 
-variable "DESIRED_COUNT" {
-  description = "Number of desired instances for a service task"
-  type = number
-  default = 1
+variable "MIN_COUNT" {
+  description = "Minimum number of desired instances for a service task"
+  type        = number
+  default     = 1
+}
+
+variable "MAX_COUNT" {
+  description = "Maximum number of desired instances for a service task"
+  type        = number
+  default     = 100
 }
 
 variable "CPU_ARCHITECTURE" {

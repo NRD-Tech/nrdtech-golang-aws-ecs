@@ -64,7 +64,7 @@
 #   name            = "${var.APP_IDENT}-service"
 #   cluster         = aws_ecs_cluster.ecs.arn
 #   task_definition = aws_ecs_task_definition.task_definition.arn
-#   desired_count   = var.DESIRED_COUNT
+#   desired_count   = var.MIN_COUNT
 #   deployment_maximum_percent         = 200
 #   deployment_minimum_healthy_percent = 100
 
@@ -97,12 +97,13 @@
 
 #   lifecycle {
 #     create_before_destroy = true
+#     ignore_changes        = [desired_count]
 #   }
 # }
 
 # resource "aws_appautoscaling_target" "ecs_target" {
-#   max_capacity       = 2  # Configure this to something appropriate for your application
-#   min_capacity       = 1  # Configure this to something appropriate for your application
+#   max_capacity       = var.MAX_COUNT
+#   min_capacity       = var.MIN_COUNT
 #   resource_id        = "service/${local.cluster_name}/${aws_ecs_service.ecs_service.name}"
 #   scalable_dimension = "ecs:service:DesiredCount"
 #   service_namespace  = "ecs"
