@@ -68,6 +68,9 @@
 #   deployment_maximum_percent         = 200
 #   deployment_minimum_healthy_percent = 100
 
+#   # Add tags to ensure ECS tasks inherit the awsApplication tag for cost tracking
+#   tags = data.terraform_remote_state.app_bootstrap.outputs.app_tags
+
 #   dynamic "capacity_provider_strategy" {
 #     for_each = local.ecs_target.capacity_provider_strategy
 #     content {
