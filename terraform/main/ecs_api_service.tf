@@ -184,7 +184,7 @@
 #   load_balancer_arn = aws_lb.ecs_alb.arn
 #   port              = 443
 #   protocol          = "HTTPS"
-#   ssl_policy        = "ELBSecurityPolicy-TLS-1-2-2021-06" # Supports TLS 1.3 for better performance
+#   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06" # Supports TLS 1.3 for better performance
 #   certificate_arn   = aws_acm_certificate.cert.arn
 
 #   default_action {
