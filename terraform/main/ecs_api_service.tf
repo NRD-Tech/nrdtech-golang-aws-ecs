@@ -11,11 +11,11 @@
 #   fargate_spot_strategy = tolist([
 #     {
 #       capacity_provider = "FARGATE"
-#       weight            = 3
+#       weight            = 2
 #     },
 #     {
 #       capacity_provider = "FARGATE_SPOT"
-#       weight            = 7
+#       weight            = 8
 #     }
 #   ])
 
@@ -136,6 +136,11 @@
 #   load_balancer_type = "application"
 #   security_groups    = [aws_security_group.alb_sg.id]
 #   subnets            = data.aws_subnets.public.ids
+  
+#   # Performance optimizations
+#   enable_deletion_protection = false
+#   enable_http2               = true
+#   idle_timeout               = 60
 # }
 
 # # Target Group
@@ -146,8 +151,19 @@
 #   protocol    = "HTTP"
 #   vpc_id      = data.aws_vpc.selected.id
 #   target_type = "ip" # Change this from "instance" to "ip"
+  
+#   # Performance optimizations
+#   deregistration_delay = 30  # Faster instance removal
+  
 #   health_check {
-#     path = "/ping"
+#     path                = "/healthcheck"
+#     healthy_threshold   = 2
+#     unhealthy_threshold = 2
+#     timeout             = 5
+#     interval            = 10
+#     matcher             = "200"
+#     port                = "traffic-port"
+#     protocol            = "HTTP"
 #   }
 # }
 
@@ -168,7 +184,7 @@
 #   load_balancer_arn = aws_lb.ecs_alb.arn
 #   port              = 443
 #   protocol          = "HTTPS"
-#   ssl_policy        = "ELBSecurityPolicy-2016-08" # Adjust as needed
+#   ssl_policy        = "ELBSecurityPolicy-TLS-1-2-2021-06" # Supports TLS 1.3 for better performance
 #   certificate_arn   = aws_acm_certificate.cert.arn
 
 #   default_action {

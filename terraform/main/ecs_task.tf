@@ -25,6 +25,11 @@ resource "aws_ecs_task_definition" "task_definition" {
     image     = "${aws_ecr_repository.ecr_repository.repository_url}:${null_resource.push_image.triggers.code_hash}"
     cpu       = var.APP_CPU
     memory    = var.APP_MEMORY
+    
+    # Performance optimizations
+    essential = true
+    stopTimeout = 30
+    
     portMappings = [{
       containerPort = 8080
       protocol      = "tcp"

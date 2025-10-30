@@ -30,20 +30,20 @@ data "aws_caller_identity" "current" {}
 # VPC
 #############################
 # Custom VPC
-# locals {
-#   vpc_name = "my-standard-vpc"
-# }
-# data "aws_vpc" "selected" {
-#   filter {
-#     name   = "tag:Name"
-#     values = [local.vpc_name]
-#   }
-# }
+locals {
+  vpc_name = "my-standard-vpc"
+}
+data "aws_vpc" "selected" {
+  filter {
+    name   = "tag:Name"
+    values = [local.vpc_name]
+  }
+}
 
 # Default VPC
-data "aws_vpc" "selected" {
-  default = true
-}
+# data "aws_vpc" "selected" {
+#   default = true
+# }
 
 data "aws_subnets" "subnets" {
   filter {
