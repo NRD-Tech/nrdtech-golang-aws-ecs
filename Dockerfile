@@ -1,5 +1,5 @@
 # Stage 1: Build the Go binary
-FROM golang:1.23.3 AS builder
+FROM golang:1.24.3 AS builder
 
 # Set default build argument for architecture
 ARG TARGETARCH=amd64

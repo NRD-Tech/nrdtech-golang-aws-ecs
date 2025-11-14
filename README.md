@@ -2,7 +2,7 @@
 This is a project template for a golang application that can be triggered either by an Event Bridge scheduled rule or an API via a load balancer. 
 
 # Technology Stack
-* Golang 1.23.3
+* Golang 1.24.3
 * Docker
 * Terraform
 
