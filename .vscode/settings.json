@@ -1,7 +1,12 @@
 {
-    // Window Settings
-    "window.title": "${rootName}",
+  // Window Settings
+  "window.title": "${rootName}",
 
-    // Line Ending Configuration
-    "files.eol": "\n",
+  // Line Ending Configuration
+  "files.eol": "\n",
+
+     // File Associations
+  "files.associations": {
+    "config.*": "shellscript"
+  }
 }
