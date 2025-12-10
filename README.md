@@ -74,32 +74,59 @@ git add .
 git commit -a -m 'updated config'
 ```
 
-## (If using Bitbucket) Enable Bitbucket Pipeline (NOTE: GitHub does not require any setup like this for the Actions to work)
+## Enable GitHub Flow Deployment (Default and Preferred Method)
+
+**Note:** This is a template project. To enable GitHub Actions deployment, you must activate the workflow file:
+
+* Rename `.github/workflows/github_flow.yml.disabled` to `.github/workflows/github_flow.yml`
+  * This enables the GitHub Actions workflow for automated deployment
+  * The workflow automatically reads configuration from `config.global` (no manual editing needed)
+
+The GitHub Flow workflow will:
+* Run tests on all pushes and pull requests to `main`
+* Automatically deploy to **staging** when code is pushed to the `main` branch
+* Automatically deploy to **production** when a version tag (e.g., `v1.0.0`) is created and pushed
+
+### Deploy to Staging
+Simply push your changes to the `main` branch:
+```
+git push origin main
+```
+The workflow will automatically deploy to staging after tests pass.
+
+### Deploy to Production
+Create and push a version tag:
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+The workflow will automatically deploy to production after tests pass.
+
+## (Alternative: If using Bitbucket) Enable Bitbucket Pipeline
 * Push your git project up into a new Bitbucket project
 * Navigate to your project on Bitbucket
   * Click Repository Settings
   * Click Pipelines->Settings
     * Click Enable Pipelines
+* Deploy to Staging:
+  ```
+  git checkout -b staging
+  git push --set-upstream origin staging
+  ```
+* Deploy to Production:
+  ```
+  git checkout -b production
+  git push --set-upstream origin production
+  ```
 
-## (If using GitHub) Configure the AWS Role
-* Edit .github/workflows/main.yml
-    * Set the pipeline role for role-to-assume
-      * This should be the same as the AWS_ROLE_ARN in your config.global
-    * Set the correct aws-region
+## Un-Deploying
 
-## Deploy to Staging
-```
-git checkout -b staging
-git push --set-upstream origin staging
-```
+### Un-Deploying with GitHub Flow
+To un-deploy resources, you can manually run the Terraform destroy scripts:
+* For staging: `ENVIRONMENT=staging ./_run_terraform_destroy.sh`
+* For production: `ENVIRONMENT=prod ./_run_terraform_destroy.sh`
 
-## Deploy to Production
-```
-git checkout -b production
-git push --set-upstream origin production
-```
-
-## Un-Deploying in Bitbucket
+### Un-Deploying in Bitbucket
 1. Navigate to the Bitbucket project website
 2. Click Pipelines in the left nav menu
 3. Click Run pipeline button
