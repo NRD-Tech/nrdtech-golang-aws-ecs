@@ -1,297 +1,284 @@
-# locals {
-#   # 1. Define each capacity provider strategy as a list
-#   #    so Terraform doesn't see them as "tuple of length 1 vs 2 vs 0"
-#   fargate_strategy = tolist([
-#     {
-#       capacity_provider = "FARGATE"
-#       weight            = 1
-#     }
-#   ])
+# API service trigger (ALB + ECS service) - active when trigger_type = "ecs_api_service"
+# Set API_DOMAIN and API_ROOT_DOMAIN in config.<env> when using this trigger.
 
-#   fargate_spot_strategy = tolist([
-#     {
-#       capacity_provider = "FARGATE"
-#       weight            = 2
-#     },
-#     {
-#       capacity_provider = "FARGATE_SPOT"
-#       weight            = 8
-#     }
-#   ])
+locals {
+  ecs_api_service_enabled = var.trigger_type == "ecs_api_service"
 
-#   ec2_strategy = tolist([
-#     {
-#       capacity_provider = "EC2"
-#       weight            = 1
-#     }
-#   ])
+  api_fargate_strategy = tolist([{ capacity_provider = "FARGATE", weight = 1 }])
+  api_fargate_spot_strategy = tolist([
+    { capacity_provider = "FARGATE", weight = 2 },
+    { capacity_provider = "FARGATE_SPOT", weight = 8 },
+  ])
+  api_ec2_strategy = tolist([{ capacity_provider = "EC2", weight = 1 }])
 
-#   # 2. Define your local “ecs_target” by picking one of the above
-#   ecs_target = {
-#     capacity_provider_strategy = (
-#       var.LAUNCH_TYPE == "FARGATE" ? local.fargate_strategy :
-#       var.LAUNCH_TYPE == "FARGATE_SPOT" ? local.fargate_spot_strategy :
-#       local.ec2_strategy
-#     )
+  api_ecs_target = var.trigger_type == "ecs_api_service" ? {
+    capacity_provider_strategy = (
+      var.LAUNCH_TYPE == "FARGATE" ? local.api_fargate_strategy :
+      var.LAUNCH_TYPE == "FARGATE_SPOT" ? local.api_fargate_spot_strategy :
+      local.api_ec2_strategy
+    )
+    network_configuration = (
+      var.LAUNCH_TYPE == "FARGATE" || var.LAUNCH_TYPE == "FARGATE_SPOT"
+        ? {
+            security_groups  = [aws_security_group.ecs_sg[0].id]
+            subnets          = data.aws_subnets.public.ids
+            assign_public_ip = true
+          }
+        : {
+            security_groups  = [aws_security_group.ecs_sg[0].id]
+            subnets          = data.aws_subnets.public.ids
+            assign_public_ip = false
+          }
+    )
+  } : null
+}
 
-#     # network configuration depends on whether it's Fargate or not
-#     network_configuration = (
-#       var.LAUNCH_TYPE == "FARGATE" || var.LAUNCH_TYPE == "FARGATE_SPOT"
-#         ? {
-#             security_groups  = [aws_security_group.ecs_sg.id]
-#             subnets          = data.aws_subnets.public.ids
-#             assign_public_ip = true
-#           }
-#         : {
-#             security_groups = [aws_security_group.ecs_sg.id]
-#             subnets = data.aws_subnets.public.ids
-#             assign_public_ip = false
-#           }
-#     )
-#   }
-# }
+locals {
+  api_cluster_name = var.trigger_type == "ecs_api_service" ? element(split("/", aws_ecs_cluster.ecs.arn), 1) : ""
+}
 
-# locals {
-#   cluster_name = element(split("/", aws_ecs_cluster.ecs.arn), 1)
-# }
+data "aws_route53_zone" "api_domain" {
+  count = local.ecs_api_service_enabled && var.API_ROOT_DOMAIN != "" ? 1 : 0
 
-# data "aws_ecs_cluster" "cluster" {
-#   cluster_name = local.cluster_name
-# }
+  name = "${var.API_ROOT_DOMAIN}."
+}
 
-# # ECS Service
-# resource "aws_ecs_service" "ecs_service" {
-#   name            = "${var.APP_IDENT}-service"
-#   cluster         = aws_ecs_cluster.ecs.arn
-#   task_definition = aws_ecs_task_definition.task_definition.arn
-#   desired_count   = var.MIN_COUNT
-#   deployment_maximum_percent         = 200
-#   deployment_minimum_healthy_percent = 100
+# Security groups first (referenced by api_ecs_target local and ALB)
+resource "aws_security_group" "ecs_sg" {
+  count = local.ecs_api_service_enabled ? 1 : 0
 
-#   # Add tags to ensure ECS tasks inherit the awsApplication tag for cost tracking
-#   tags = data.terraform_remote_state.app_bootstrap.outputs.app_tags
+  name   = "${var.APP_IDENT}-ecs-sg"
+  vpc_id = local.vpc_id
 
-#   dynamic "capacity_provider_strategy" {
-#     for_each = local.ecs_target.capacity_provider_strategy
-#     content {
-#       capacity_provider = capacity_provider_strategy.value.capacity_provider
-#       weight            = capacity_provider_strategy.value.weight
-#     }
-#   }
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-#   dynamic "network_configuration" {
-#     for_each = local.ecs_target.network_configuration != null ? [1] : []
-#     content {
-#       security_groups  = local.ecs_target.network_configuration.security_groups
-#       subnets          = local.ecs_target.network_configuration.subnets
-#       assign_public_ip = local.ecs_target.network_configuration.assign_public_ip
-#     }
-#   }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
 
-#   load_balancer {
-#     target_group_arn = aws_lb_target_group.ecs_target_group.arn
-#     container_name   = var.APP_IDENT
-#     container_port   = 8080
-#   }
+resource "aws_security_group" "alb_sg" {
+  count = local.ecs_api_service_enabled ? 1 : 0
 
-#   deployment_controller {
-#     type = "ECS"
-#   }
+  name   = "${var.APP_IDENT}-alb-sg"
+  vpc_id = local.vpc_id
 
-#   lifecycle {
-#     create_before_destroy = true
-#     ignore_changes        = [desired_count]
-#   }
-# }
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-# resource "aws_appautoscaling_target" "ecs_target" {
-#   max_capacity       = var.MAX_COUNT
-#   min_capacity       = var.MIN_COUNT
-#   resource_id        = "service/${local.cluster_name}/${aws_ecs_service.ecs_service.name}"
-#   scalable_dimension = "ecs:service:DesiredCount"
-#   service_namespace  = "ecs"
-# }
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 
-# resource "aws_appautoscaling_policy" "scale_out" {
-#   name                   = "scale-out"
-#   service_namespace      = aws_appautoscaling_target.ecs_target.service_namespace
-#   resource_id            = aws_appautoscaling_target.ecs_target.resource_id
-#   scalable_dimension     = aws_appautoscaling_target.ecs_target.scalable_dimension
-#   policy_type            = "TargetTrackingScaling"
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
 
-#   target_tracking_scaling_policy_configuration {
-#     target_value       = 75.0
-#     predefined_metric_specification {
-#       predefined_metric_type = "ECSServiceAverageCPUUtilization"
-#     }
-#     scale_out_cooldown  = 60
-#     scale_in_cooldown   = 60
-#   }
-# }
+resource "aws_lb" "ecs_alb" {
+  count = local.ecs_api_service_enabled ? 1 : 0
 
-# # Application Load Balancer
-# resource "aws_lb" "ecs_alb" {
-#   name               = "${var.APP_IDENT}-alb"
-#   internal           = false
-#   load_balancer_type = "application"
-#   security_groups    = [aws_security_group.alb_sg.id]
-#   subnets            = data.aws_subnets.public.ids
-  
-#   # Performance optimizations
-#   enable_deletion_protection = false
-#   enable_http2               = true
-#   idle_timeout               = 60
-# }
+  name               = "${var.APP_IDENT}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.alb_sg[0].id]
+  subnets            = data.aws_subnets.public.ids
 
-# # Target Group
-# resource "aws_lb_target_group" "ecs_target_group" {
-#   # NOTE: name cannot be longer than 32 characters
-#   name        = "${var.APP_IDENT}-tg"
-#   port        = 8080
-#   protocol    = "HTTP"
-#   vpc_id      = data.aws_vpc.selected.id
-#   target_type = "ip" # Change this from "instance" to "ip"
-  
-#   # Performance optimizations
-#   deregistration_delay = 30  # Faster instance removal
-  
-#   health_check {
-#     path                = "/healthcheck"
-#     healthy_threshold   = 2
-#     unhealthy_threshold = 2
-#     timeout             = 5
-#     interval            = 10
-#     matcher             = "200"
-#     port                = "traffic-port"
-#     protocol            = "HTTP"
-#   }
-# }
+  enable_deletion_protection = false
+  enable_http2               = true
+  idle_timeout               = 60
+}
 
-# # Listener for ALB
-# resource "aws_lb_listener" "http_listener" {
-#   load_balancer_arn = aws_lb.ecs_alb.arn
-#   port              = 80
-#   protocol          = "HTTP"
+resource "aws_lb_target_group" "ecs_target_group" {
+  count = local.ecs_api_service_enabled ? 1 : 0
 
-#   default_action {
-#     type             = "forward"
-#     target_group_arn = aws_lb_target_group.ecs_target_group.arn
-#   }
-# }
+  name        = "${var.APP_IDENT}-tg"
+  port        = 8080
+  protocol    = "HTTP"
+  vpc_id      = local.vpc_id
+  target_type = "ip"
 
-# resource "aws_lb_listener" "https_listener" {
-#   depends_on = [aws_acm_certificate_validation.cert_validation]
-#   load_balancer_arn = aws_lb.ecs_alb.arn
-#   port              = 443
-#   protocol          = "HTTPS"
-#   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06" # Supports TLS 1.3 for better performance
-#   certificate_arn   = aws_acm_certificate.cert.arn
+  deregistration_delay = 30
 
-#   default_action {
-#     type             = "forward"
-#     target_group_arn = aws_lb_target_group.ecs_target_group.arn
-#   }
-# }
+  health_check {
+    path                = "/healthcheck"
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 5
+    interval            = 10
+    matcher             = "200"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+  }
+}
 
-# # Security Group for ECS and ALB
-# resource "aws_security_group" "ecs_sg" {
-#   name   = "${var.APP_IDENT}-ecs-sg"
-#   vpc_id = data.aws_vpc.selected.id
+resource "aws_ecs_service" "ecs_service" {
+  count = local.ecs_api_service_enabled ? 1 : 0
 
-#   ingress {
-#     from_port   = 8080
-#     to_port     = 8080
-#     protocol    = "tcp"
-#     cidr_blocks = ["0.0.0.0/0"]
-#   }
+  name            = "${var.APP_IDENT}-service"
+  cluster         = aws_ecs_cluster.ecs.arn
+  task_definition = aws_ecs_task_definition.task_definition.arn
+  desired_count   = var.MIN_COUNT
+  deployment_maximum_percent         = 200
+  deployment_minimum_healthy_percent = 100
 
-#   egress {
-#     from_port   = 0
-#     to_port     = 0
-#     protocol    = "-1"
-#     cidr_blocks = ["0.0.0.0/0"]
-#   }
-# }
+  tags = data.terraform_remote_state.app_bootstrap.outputs.app_tags
 
-# resource "aws_security_group" "alb_sg" {
-#   name   = "${var.APP_IDENT}-alb-sg"
-#   vpc_id = data.aws_vpc.selected.id
+  dynamic "capacity_provider_strategy" {
+    for_each = local.ecs_api_service_enabled ? local.api_ecs_target.capacity_provider_strategy : []
+    content {
+      capacity_provider = capacity_provider_strategy.value.capacity_provider
+      weight            = capacity_provider_strategy.value.weight
+    }
+  }
 
-#   ingress {
-#     from_port   = 80
-#     to_port     = 80
-#     protocol    = "tcp"
-#     cidr_blocks = ["0.0.0.0/0"]
-#   }
+  dynamic "network_configuration" {
+    for_each = local.ecs_api_service_enabled ? [local.api_ecs_target.network_configuration] : []
+    content {
+      security_groups  = network_configuration.value.security_groups
+      subnets          = network_configuration.value.subnets
+      assign_public_ip = network_configuration.value.assign_public_ip
+    }
+  }
 
-#   ingress {
-#     from_port   = 443
-#     to_port     = 443
-#     protocol    = "tcp"
-#     cidr_blocks = ["0.0.0.0/0"]
-#   }
+  load_balancer {
+    target_group_arn = aws_lb_target_group.ecs_target_group[0].arn
+    container_name   = var.APP_IDENT
+    container_port   = 8080
+  }
 
-#   egress {
-#     from_port   = 0
-#     to_port     = 0
-#     protocol    = "-1"
-#     cidr_blocks = ["0.0.0.0/0"]
-#   }
-# }
+  deployment_controller {
+    type = "ECS"
+  }
 
-# ############## route53
+  lifecycle {
+    create_before_destroy = true
+    ignore_changes       = [desired_count]
+  }
+}
 
-# resource "aws_route53_record" "alb_dns_record" {
-#   zone_id = data.aws_route53_zone.api_domain.zone_id
-#   name    = var.API_DOMAIN
-#   type    = "A"
+resource "aws_appautoscaling_target" "ecs_target" {
+  count = local.ecs_api_service_enabled ? 1 : 0
 
-#   alias {
-#     name                   = aws_lb.ecs_alb.dns_name
-#     zone_id                = aws_lb.ecs_alb.zone_id
-#     evaluate_target_health = true
-#   }
-# }
+  max_capacity       = var.MAX_COUNT
+  min_capacity       = var.MIN_COUNT
+  resource_id        = local.ecs_api_service_enabled ? "service/${local.api_cluster_name}/${aws_ecs_service.ecs_service[0].name}" : ""
+  scalable_dimension  = "ecs:service:DesiredCount"
+  service_namespace  = "ecs"
+}
 
-# ############## cert
+resource "aws_appautoscaling_policy" "scale_out" {
+  count = local.ecs_api_service_enabled ? 1 : 0
 
-# resource "aws_acm_certificate" "cert" {
-#   domain_name       = var.API_DOMAIN
-#   validation_method = "DNS"
+  name                = "scale-out"
+  service_namespace    = local.ecs_api_service_enabled ? aws_appautoscaling_target.ecs_target[0].service_namespace : "ecs"
+  resource_id          = local.ecs_api_service_enabled ? aws_appautoscaling_target.ecs_target[0].resource_id : ""
+  scalable_dimension   = local.ecs_api_service_enabled ? aws_appautoscaling_target.ecs_target[0].scalable_dimension : "ecs:service:DesiredCount"
+  policy_type          = "TargetTrackingScaling"
 
-#   tags = {
-#     Environment = "test"
-#   }
+  target_tracking_scaling_policy_configuration {
+    target_value = 75.0
+    predefined_metric_specification {
+      predefined_metric_type = "ECSServiceAverageCPUUtilization"
+    }
+    scale_out_cooldown = 60
+    scale_in_cooldown  = 60
+  }
+}
 
-#   lifecycle {
-#     create_before_destroy = true
-#   }
-# }
+resource "aws_lb_listener" "http_listener" {
+  count = local.ecs_api_service_enabled ? 1 : 0
 
-# resource "aws_acm_certificate_validation" "cert_validation" {
-#   certificate_arn         = aws_acm_certificate.cert.arn
-#   validation_record_fqdns = [for record in aws_route53_record.cert_validation_records : record.fqdn]
+  load_balancer_arn = aws_lb.ecs_alb[0].arn
+  port              = 80
+  protocol          = "HTTP"
 
-#   depends_on = [aws_route53_record.cert_validation_records]
-# }
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.ecs_target_group[0].arn
+  }
+}
 
-# resource "aws_route53_record" "cert_validation_records" {
-#   provider = aws.useast1
-#   for_each = {
-#     for dvo in aws_acm_certificate.cert.domain_validation_options : dvo.domain_name => {
-#       name   = dvo.resource_record_name
-#       record = dvo.resource_record_value
-#       type   = dvo.resource_record_type
-#     }
-#   }
+# Certificate and HTTPS (only when API_DOMAIN is set).
+# Certificate must be in the same region as the ALB (default provider); us-east-1 is only for CloudFront/API Gateway.
+resource "aws_acm_certificate" "cert" {
+  count = local.ecs_api_service_enabled && var.API_DOMAIN != "" ? 1 : 0
 
-#   zone_id = data.aws_route53_zone.api_domain.zone_id
-#   name    = each.value.name
-#   type    = each.value.type
-#   records = [each.value.record]
-#   ttl     = 60
-# }
+  domain_name       = var.API_DOMAIN
+  validation_method = "DNS"
 
-# data "aws_route53_zone" "api_domain" {
-#   name = "${var.API_ROOT_DOMAIN}."
-# }
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "cert_validation_records" {
+  for_each = local.ecs_api_service_enabled && var.API_DOMAIN != "" ? {
+    for dvo in aws_acm_certificate.cert[0].domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  } : {}
+
+  zone_id = data.aws_route53_zone.api_domain[0].zone_id
+  name    = each.value.name
+  type    = each.value.type
+  records = [each.value.record]
+  ttl     = 60
+}
+
+resource "aws_acm_certificate_validation" "cert_validation" {
+  count = local.ecs_api_service_enabled && var.API_DOMAIN != "" ? 1 : 0
+
+  certificate_arn         = aws_acm_certificate.cert[0].arn
+  validation_record_fqdns = [for r in aws_route53_record.cert_validation_records : r.fqdn]
+}
+
+resource "aws_lb_listener" "https_listener" {
+  count = local.ecs_api_service_enabled && var.API_DOMAIN != "" ? 1 : 0
+
+  depends_on         = [aws_acm_certificate_validation.cert_validation]
+  load_balancer_arn  = aws_lb.ecs_alb[0].arn
+  port               = 443
+  protocol           = "HTTPS"
+  ssl_policy         = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+  certificate_arn    = aws_acm_certificate.cert[0].arn
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.ecs_target_group[0].arn
+  }
+}
+
+resource "aws_route53_record" "alb_dns_record" {
+  count = local.ecs_api_service_enabled && var.API_DOMAIN != "" && var.API_ROOT_DOMAIN != "" ? 1 : 0
+
+  zone_id = data.aws_route53_zone.api_domain[0].zone_id
+  name    = var.API_DOMAIN
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.ecs_alb[0].dns_name
+    zone_id                = aws_lb.ecs_alb[0].zone_id
+    evaluate_target_health = true
+  }
+}

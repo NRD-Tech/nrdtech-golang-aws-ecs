@@ -50,18 +50,36 @@ variable "MAX_COUNT" {
 
 variable "CPU_ARCHITECTURE" {
   description = "X86_64 or ARM64"
-  type = string
+  type        = string
+}
+
+variable "VPC_NAME" {
+  description = "Optional: tag Name of VPC to use. Empty string = default VPC. Set in config.global / config.<env>."
+  type        = string
+  default     = ""
 }
 
 ##################################################
-# API Gateway variables
+# Trigger type: ecs_eventbridge or ecs_api_service.
+# Switching triggers uses a two-phase apply to avoid cycles.
+##################################################
+variable "trigger_type" {
+  description = "ECS trigger: ecs_eventbridge (scheduled) or ecs_api_service (ALB + service). Set in config.global / config.<env>. Use 'none' only for internal two-phase apply."
+  type        = string
+  default     = "ecs_eventbridge"
+}
+
+##################################################
+# API service variables (only when trigger_type = ecs_api_service)
 ##################################################
 variable "API_DOMAIN" {
-  type = string
+  type    = string
+  default = ""
 }
 
 variable "API_ROOT_DOMAIN" {
-  type = string
+  type    = string
+  default = ""
 }
 
 ##################################################
