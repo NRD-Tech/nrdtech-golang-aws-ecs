@@ -32,7 +32,12 @@ export LAUNCH_TYPE=FARGATE
 #        create an ARM64 GitHub-hosted runner and use that instead.
 export CPU_ARCHITECTURE=X86_64
 
-# For Custom VPC: Uncomment and configure sections in terraform main.tf
+# ECS trigger: ecs_eventbridge (scheduled) or ecs_api_service (ALB + service).
+# Set in config.<env> to override. Use "none" only for internal two-phase apply.
+export trigger_type=ecs_eventbridge
+
+# Optional: set VPC_NAME to a tag:Name value to use a custom VPC; leave unset for default VPC
+# export VPC_NAME=my-standard-vpc
 
 #########################################################
 # Create code hash

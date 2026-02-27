@@ -27,34 +27,35 @@ data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
 #############################
-# VPC
+# VPC: default when VPC_NAME is empty, else lookup by tag Name
 #############################
-# Custom VPC
-locals {
-  vpc_name = "my-standard-vpc"
-}
 data "aws_vpc" "selected" {
+  count  = var.VPC_NAME != "" ? 1 : 0
   filter {
     name   = "tag:Name"
-    values = [local.vpc_name]
+    values = [var.VPC_NAME]
   }
 }
 
-# Default VPC
-# data "aws_vpc" "selected" {
-#   default = true
-# }
+data "aws_vpc" "selected_default" {
+  count   = var.VPC_NAME == "" ? 1 : 0
+  default = true
+}
+
+locals {
+  vpc_id = var.VPC_NAME != "" ? data.aws_vpc.selected[0].id : data.aws_vpc.selected_default[0].id
+}
 
 data "aws_subnets" "subnets" {
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.selected.id]
+    values = [local.vpc_id]
   }
 }
 data "aws_subnets" "public" {
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.selected.id]
+    values = [local.vpc_id]
   }
   filter {
     name   = "tag:Name"
@@ -64,7 +65,7 @@ data "aws_subnets" "public" {
 data "aws_subnets" "private" {
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.selected.id]
+    values = [local.vpc_id]
   }
   filter {
     name   = "tag:Name"
@@ -74,7 +75,7 @@ data "aws_subnets" "private" {
 data "aws_route_tables" "private" {
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.selected.id]
+    values = [local.vpc_id]
   }
 
   filter {
