@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Setup for AWS ECS template. Configures app type (ecs_api_service | ecs_background_service | ecs_eventbridge),
-config.global / config.staging / config.prod. Auto-discovers OIDC role, Terraform state bucket, and Route53 domains.
-Run from project root: python3 setup.py [--app-type ...] [options]
-Works on macOS and Windows (Python 3.6+). Safe to re-run; existing config values used as defaults.
+Setup for AWS ECS (Go) template.
+Configures app type (api | background_service | scheduled),
+config.global / config.staging / config.prod, and Go source files.
+Auto-discovers OIDC role, Terraform state bucket, and Route53 domains.
+
+Run from project root:  python3 setup.py [--app-type ...] [options]
+Works on macOS and Windows (Python 3.6+). Safe to re-run.
 """
 
 from __future__ import print_function
@@ -21,118 +24,80 @@ CONFIG_PROD = os.path.join(SCRIPT_DIR, "config.prod")
 MAIN_GO_PATH = os.path.join(SCRIPT_DIR, "cmd", "app", "main.go")
 GO_MOD_PATH = os.path.join(SCRIPT_DIR, "go.mod")
 
-APP_TYPES = ("ecs_api_service", "ecs_background_service", "ecs_eventbridge")
-OIDC_FEDERATION = "token.actions.githubusercontent.com"
+APP_TYPES = ("api", "background_service", "scheduled")
 
-# Template placeholders in config.global; treat as unset so discovery/prompt run
+TRIGGER_TYPE_MAP = {
+    "api": "ecs_api_service",
+    "background_service": "ecs_background_service",
+    "scheduled": "ecs_eventbridge",
+}
+TRIGGER_TYPE_REVERSE = {v: k for k, v in TRIGGER_TYPE_MAP.items()}
+
+OIDC_FEDERATION = "token.actions.githubusercontent.com"
 TERRAFORM_STATE_BUCKET_PLACEHOLDER = "mycompany-terraform-state"
 AWS_ROLE_ARN_PLACEHOLDER_ACCOUNT = "1234567890"
 
-# main.go bodies: Fiber (ecs_api_service) and EventBridge/scheduled. Fiber includes /healthcheck for ALB.
-MAIN_GO_FIBER = '''package main
+# ---------------------------------------------------------------------------
+# main.go templates
+# ---------------------------------------------------------------------------
+MAIN_GO_API = '''\
+package main
 
-/*********************************
-# Fiber API Service
-*********************************/
 import (
-	"github.com/gofiber/fiber/v2"
-	"log"
-	"os"
-	"os/signal"
-	"syscall"
+\t"github.com/gofiber/fiber/v2"
+\t"log"
+\t"os"
+\t"os/signal"
+\t"syscall"
 )
 
 func main() {
-	app := fiber.New()
+\tapp := fiber.New()
 
-	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString("Hello, Fiber!")
-	})
-	app.Get("/ping", func(c *fiber.Ctx) error {
-		return c.SendString("pong")
-	})
-	app.Get("/healthcheck", func(c *fiber.Ctx) error {
-		return c.SendStatus(fiber.StatusOK)
-	})
+\tapp.Get("/", func(c *fiber.Ctx) error {
+\t\treturn c.SendString("Hello, Fiber!")
+\t})
+\tapp.Get("/ping", func(c *fiber.Ctx) error {
+\t\treturn c.SendString("pong")
+\t})
+\tapp.Get("/healthcheck", func(c *fiber.Ctx) error {
+\t\treturn c.SendStatus(fiber.StatusOK)
+\t})
 
-	go func() {
-		if err := app.Listen(":8080"); err != nil {
-			log.Fatalf("Failed to start server: %v", err)
-		}
-	}()
+\tgo func() {
+\t\tif err := app.Listen(":8080"); err != nil {
+\t\t\tlog.Fatalf("Failed to start server: %v", err)
+\t\t}
+\t}()
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
+\tc := make(chan os.Signal, 1)
+\tsignal.Notify(c, os.Interrupt, syscall.SIGTERM)
+\t<-c
 
-	log.Println("Shutting down server...")
-	if err := app.Shutdown(); err != nil {
-		log.Fatalf("Failed to gracefully shutdown: %v", err)
-	}
-	log.Println("Server stopped.")
+\tlog.Println("Shutting down server...")
+\tif err := app.Shutdown(); err != nil {
+\t\tlog.Fatalf("Failed to gracefully shutdown: %v", err)
+\t}
+\tlog.Println("Server stopped.")
 }
-
-/*********************************
-# Event Bridge Schedule
-*********************************/
-//import "fmt"
-//
-//func main() {
-//	fmt.Println("Hello, World!")
-//}
 '''
 
-MAIN_GO_EVENTBRIDGE = '''package main
+MAIN_GO_TASK = '''\
+package main
 
-/*********************************
-# Event Bridge Schedule
-*********************************/
 import "fmt"
 
 func main() {
-	fmt.Println("Hello, World!")
+\tfmt.Println("Hello, World!")
 }
-
-/*********************************
-# Fiber API Service
-**********************************/
-//import (
-//	"github.com/gofiber/fiber/v2"
-//	"log"
-//	"os"
-//	"os/signal"
-//	"syscall"
-//)
-//
-//func main() {
-//	app := fiber.New()
-//	app.Get("/", func(c *fiber.Ctx) error {
-//		return c.SendString("Hello, Fiber!")
-//	})
-//	app.Get("/ping", func(c *fiber.Ctx) error {
-//		return c.SendString("pong")
-//	})
-//	app.Get("/healthcheck", func(c *fiber.Ctx) error {
-//		return c.SendStatus(fiber.StatusOK)
-//	})
-//	go func() {
-//		if err := app.Listen(":8080"); err != nil {
-//			log.Fatalf("Failed to start server: %v", err)
-//		}
-//	}()
-//	c := make(chan os.Signal, 1)
-//	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-//	<-c
-//	log.Println("Shutting down server...")
-//	if err := app.Shutdown(); err != nil {
-//		log.Fatalf("Failed to gracefully shutdown: %v", err)
-//	}
-//	log.Println("Server stopped.")
-//}
 '''
 
 
-def _parse_export_file(path: str) -> dict:
+# ---------------------------------------------------------------------------
+# Config parsing
+# ---------------------------------------------------------------------------
+def _parse_export_file(path):
+    """Parse shell ``export KEY=value`` lines into a dict (quotes stripped)."""
     out = {}
     if not os.path.isfile(path):
         return out
@@ -150,7 +115,38 @@ def _parse_export_file(path: str) -> dict:
     return out
 
 
-def _has_credentials() -> bool:
+def read_current_config():
+    current = {}
+    g = _parse_export_file(CONFIG_GLOBAL)
+    if g:
+        current["app_name"] = g.get("APP_IDENT_WITHOUT_ENV", "")
+        current["terraform_state_bucket"] = g.get("TERRAFORM_STATE_BUCKET", "")
+        current["aws_region"] = g.get("AWS_DEFAULT_REGION", "us-west-2")
+        current["aws_role_arn"] = g.get("AWS_ROLE_ARN", "")
+        current["app_cpu"] = g.get("APP_CPU", "256")
+        current["app_memory"] = g.get("APP_MEMORY", "512")
+        current["launch_type"] = g.get("LAUNCH_TYPE", "FARGATE")
+        current["cpu_architecture"] = g.get("CPU_ARCHITECTURE", "X86_64")
+        raw_tt = g.get("trigger_type", "ecs_eventbridge")
+        current["app_type"] = TRIGGER_TYPE_REVERSE.get(raw_tt, "scheduled")
+        current["vpc_name"] = g.get("VPC_NAME", "")
+    s = _parse_export_file(CONFIG_STAGING)
+    if s:
+        current["api_root_domain"] = s.get("API_ROOT_DOMAIN", "")
+        current["api_domain_staging"] = s.get("API_DOMAIN", "")
+        current["min_count"] = s.get("MIN_COUNT", "1")
+        current["max_count_staging"] = s.get("MAX_COUNT", "2")
+    p = _parse_export_file(CONFIG_PROD)
+    if p:
+        current["api_domain_prod"] = p.get("API_DOMAIN", "")
+        current["max_count_prod"] = p.get("MAX_COUNT", "2")
+    return current
+
+
+# ---------------------------------------------------------------------------
+# AWS credentials
+# ---------------------------------------------------------------------------
+def _has_credentials():
     if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
         return True
     if os.environ.get("AWS_PROFILE"):
@@ -164,8 +160,8 @@ def _has_credentials() -> bool:
     return False
 
 
-def prompt_for_aws_credentials() -> None:
-    """Ask user for AWS auth first: profile (default) or access key/secret; set env accordingly."""
+def prompt_for_aws_credentials():
+    print("\nAWS credentials (used to discover Terraform bucket, OIDC role, etc.)")
     choice = input("Use (1) AWS profile or (2) access key/secret? [1]: ").strip() or "1"
     if choice == "2":
         key = input("AWS_ACCESS_KEY_ID: ").strip()
@@ -183,15 +179,18 @@ def prompt_for_aws_credentials() -> None:
         os.environ.pop("AWS_SECRET_ACCESS_KEY", None)
 
 
-def ensure_aws_credentials() -> None:
+def ensure_aws_credentials():
     if _has_credentials():
         return
-    print("No AWS credentials found (AWS_ACCESS_KEY_ID/SECRET, AWS_PROFILE, or ~/.aws/credentials).", file=sys.stderr)
-    print("Run without --non-interactive to be prompted for profile or keys.", file=sys.stderr)
+    print("No AWS credentials found (AWS_PROFILE, AWS_ACCESS_KEY_ID/SECRET, or ~/.aws/credentials [default]).", file=sys.stderr)
+    print("Run without --non-interactive to be prompted, or export credentials first.", file=sys.stderr)
     sys.exit(1)
 
 
-def _try_boto3_discover(region: str) -> dict:
+# ---------------------------------------------------------------------------
+# AWS resource discovery (boto3 preferred, CLI fallback)
+# ---------------------------------------------------------------------------
+def _try_boto3_discover(region):
     out = {"oidc_roles": [], "terraform_buckets": [], "route53_domains": []}
     try:
         import boto3
@@ -200,18 +199,14 @@ def _try_boto3_discover(region: str) -> dict:
     try:
         session = boto3.Session(region_name=region)
         iam = session.client("iam")
-        paginator = iam.get_paginator("list_roles")
-        for page in paginator.paginate():
+        for page in iam.get_paginator("list_roles").paginate():
             for role in page.get("Roles", []):
                 name = role.get("RoleName")
                 arn = role.get("Arn", "")
                 try:
-                    r = iam.get_role(RoleName=name)
-                    policy = r.get("Role", {}).get("AssumeRolePolicyDocument", {})
-                    stmts = policy.get("Statement", [])
-                    for s in stmts:
-                        principal = s.get("Principal", {}) or {}
-                        fed = principal.get("Federated") or ""
+                    doc = iam.get_role(RoleName=name).get("Role", {}).get("AssumeRolePolicyDocument", {})
+                    for s in doc.get("Statement", []):
+                        fed = (s.get("Principal") or {}).get("Federated") or ""
                         if isinstance(fed, list):
                             fed = " ".join(fed)
                         if OIDC_FEDERATION in str(fed):
@@ -240,13 +235,10 @@ def _try_boto3_discover(region: str) -> dict:
     return out
 
 
-def _run_aws_cli(cmd: list) -> dict:
+def _run_aws_cli(cmd):
     try:
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30,
+            cmd, capture_output=True, text=True, timeout=30,
             env={**os.environ, "AWS_DEFAULT_OUTPUT": "json"},
         )
         if result.returncode == 0 and result.stdout:
@@ -256,50 +248,48 @@ def _run_aws_cli(cmd: list) -> dict:
     return {}
 
 
-def _try_cli_discover(region: str) -> dict:
+def _try_cli_discover(region):
     out = {"oidc_roles": [], "terraform_buckets": [], "route53_domains": []}
-    env = {**os.environ, "AWS_DEFAULT_REGION": region}
-    paginator = _run_aws_cli(["aws", "iam", "list-roles", "--max-items", "100"])
-    for role in paginator.get("Roles", []):
+    data = _run_aws_cli(["aws", "iam", "list-roles", "--max-items", "100"])
+    for role in data.get("Roles", []):
         arn = role.get("Arn", "")
         name = role.get("RoleName", "")
-        role_detail = _run_aws_cli(["aws", "iam", "get-role", "--role-name", name]) if name else {}
-        policy = (role_detail.get("Role") or {}).get("AssumeRolePolicyDocument") or {}
-        for s in policy.get("Statement", []):
-            principal = s.get("Principal") or {}
-            fed = principal.get("Federated") or ""
+        if not name:
+            continue
+        detail = _run_aws_cli(["aws", "iam", "get-role", "--role-name", name])
+        doc = (detail.get("Role") or {}).get("AssumeRolePolicyDocument") or {}
+        for s in doc.get("Statement", []):
+            fed = (s.get("Principal") or {}).get("Federated") or ""
             if OIDC_FEDERATION in str(fed):
                 out["oidc_roles"].append({"arn": arn, "name": name})
                 break
-    buckets = _run_aws_cli(["aws", "s3api", "list-buckets"])
-    for b in buckets.get("Buckets", []):
+    for b in _run_aws_cli(["aws", "s3api", "list-buckets"]).get("Buckets", []):
         name = b.get("Name", "")
         if name and "terraform" in name.lower():
             out["terraform_buckets"].append(name)
-    zones = _run_aws_cli(["aws", "route53", "list-hosted-zones"])
-    for z in zones.get("HostedZones", []):
+    for z in _run_aws_cli(["aws", "route53", "list-hosted-zones"]).get("HostedZones", []):
         name = (z.get("Name") or "").rstrip(".")
         if name:
             out["route53_domains"].append(name)
     return out
 
 
-def discover_aws_resources(region: str) -> dict:
+def discover_aws_resources(region):
     discovered = _try_boto3_discover(region)
     if not discovered["oidc_roles"] and not discovered["terraform_buckets"]:
         discovered = _try_cli_discover(region)
     return discovered
 
 
-def _choose_from_list(prompt_msg: str, items: list, allow_custom: bool = True) -> str:
+# ---------------------------------------------------------------------------
+# UI helpers
+# ---------------------------------------------------------------------------
+def _choose_from_list(prompt_msg, items, allow_custom=True):
     if not items:
         return input("{}: ".format(prompt_msg)).strip()
     print(prompt_msg)
     for i, x in enumerate(items, 1):
-        if isinstance(x, dict):
-            label = x.get("arn") or x.get("name") or str(x)
-        else:
-            label = str(x)
+        label = x.get("arn") or x.get("name") or str(x) if isinstance(x, dict) else str(x)
         print("  {}: {}".format(i, label))
     if allow_custom:
         print("  0: Enter value manually")
@@ -316,57 +306,41 @@ def _choose_from_list(prompt_msg: str, items: list, allow_custom: bool = True) -
     return choice
 
 
-def _is_placeholder_bucket(name: str) -> bool:
+def _is_placeholder_bucket(name):
     s = (name or "").strip()
     return not s or s == TERRAFORM_STATE_BUCKET_PLACEHOLDER
 
 
-def _is_placeholder_role(arn: str) -> bool:
+def _is_placeholder_role(arn):
     a = (arn or "").strip()
     return not a or AWS_ROLE_ARN_PLACEHOLDER_ACCOUNT in a
 
 
-def _effective_current(current: dict, key: str, placeholder_check=None) -> str:
+def _effective(current, key, placeholder_check=None):
     val = current.get(key, "")
     if placeholder_check and placeholder_check(val):
         return ""
     return val or ""
 
 
-def read_current_config() -> dict:
-    current = {}
-    g = _parse_export_file(CONFIG_GLOBAL)
-    if g:
-        current["app_name"] = g.get("APP_IDENT_WITHOUT_ENV", "")
-        current["terraform_state_bucket"] = g.get("TERRAFORM_STATE_BUCKET", "")
-        current["aws_region"] = g.get("AWS_DEFAULT_REGION", "us-west-2")
-        current["aws_role_arn"] = g.get("AWS_ROLE_ARN", "")
-        current["app_cpu"] = g.get("APP_CPU", "256")
-        current["app_memory"] = g.get("APP_MEMORY", "512")
-        current["launch_type"] = g.get("LAUNCH_TYPE", "FARGATE")
-        current["cpu_architecture"] = g.get("CPU_ARCHITECTURE", "X86_64")
-        current["trigger_type"] = g.get("trigger_type", "ecs_eventbridge")
-        current["vpc_name"] = g.get("VPC_NAME", "")
-    s = _parse_export_file(CONFIG_STAGING)
-    if s:
-        current["api_root_domain"] = s.get("API_ROOT_DOMAIN", "")
-        current["api_domain_staging"] = s.get("API_DOMAIN", "")
-        current["min_count"] = s.get("MIN_COUNT", "1")
-        current["max_count_staging"] = s.get("MAX_COUNT", "2")
-    p = _parse_export_file(CONFIG_PROD)
-    if p:
-        current["api_domain_prod"] = p.get("API_DOMAIN", "")
-        current["max_count_prod"] = p.get("MAX_COUNT", "2")
-    return current
+def prompt(msg, default=""):
+    if default:
+        s = input("{} [{}]: ".format(msg, default)).strip()
+        return s if s else default
+    while True:
+        s = input("{}: ".format(msg)).strip()
+        if s:
+            return s
 
 
-def write_config_global(args: argparse.Namespace) -> None:
-    vpc_line = ""
-    if getattr(args, "vpc_name", ""):
-        vpc_line = "export VPC_NAME={}\n".format(args.vpc_name)
-    else:
-        vpc_line = "# export VPC_NAME=my-standard-vpc\n"
-    content = """#########################################################
+# ---------------------------------------------------------------------------
+# Config writers
+# ---------------------------------------------------------------------------
+def write_config_global(args):
+    vpc_line = "export VPC_NAME={}\n".format(args.vpc_name) if getattr(args, "vpc_name", "") else "# export VPC_NAME=my-standard-vpc\n"
+    trigger = TRIGGER_TYPE_MAP.get(args.app_type, "ecs_eventbridge")
+    content = """\
+#########################################################
 # Configuration
 #########################################################
 # Used to identify the application in AWS resources | allowed characters: a-zA-Z0-9-_
@@ -396,22 +370,15 @@ export LAUNCH_TYPE={launch_type}
 # Must be one of these: X86_64, ARM64
 # NOTE: If deploying to EC2 you must choose the same architecture as your instances
 # NOTE2: Only GitHub supports ARM64 builds - Bitbucket doesn't
-# NOTE3: In GitHub the build by default will be slow on ARM64. To speed this up,
-#        create an ARM64 GitHub-hosted runner and use that instead.
 export CPU_ARCHITECTURE={cpu_architecture}
 
-# ECS trigger: ecs_eventbridge (scheduled) or ecs_api_service (ALB + service).
-# Set in config.<env> to override. Use "none" only for internal two-phase apply.
+# ECS trigger type: ecs_api_service | ecs_background_service | ecs_eventbridge
 export trigger_type={trigger_type}
 
 # Optional: set VPC_NAME to a tag:Name value to use a custom VPC; leave unset for default VPC
 {vpc_line}
 #########################################################
 # Create code hash
-# NOTE:
-#   - When the code changes a new code hash file should be created
-#   - The find command here should be configured so that it finds all files such that if they change a re-build
-#     and deploy should occur
 #########################################################
 export CODE_HASH_FILE=code_hash.txt
 docker run --rm -v $(pwd):/workdir -w /workdir alpine sh -c \\
@@ -429,27 +396,26 @@ docker run --rm -v $(pwd):/workdir -w /workdir alpine sh -c \\
             app_memory=args.app_memory,
             launch_type=args.launch_type,
             cpu_architecture=args.cpu_architecture,
-            trigger_type=args.app_type,
+            trigger_type=trigger,
             vpc_line=vpc_line,
         ))
     print("Wrote config.global")
 
 
-def write_config_staging(args: argparse.Namespace) -> None:
+def write_config_staging(args):
     api_root = getattr(args, "api_root_domain", "") or "example.com"
     api_staging = getattr(args, "api_domain_staging", "") or "api-staging.example.com"
-    api_block = """
+    content = """\
+# NOTE: Variables set in here will activate only in a staging environment
+# export EXAMPLE_VAR="Hello from staging"
+
 ####################################################################################################
-# API Service Configuration
-# * You only need these if you are running your project as a service api
-# * NOTE: The root domain MUST already exist in Route53 in your AWS account for this to work
+# API Service Configuration (only needed for app type 'api')
+# * The root domain MUST already exist in Route53 in your AWS account
 ####################################################################################################
 export API_ROOT_DOMAIN={api_root_domain}
 export API_DOMAIN={api_domain_staging}
-"""
-    content = """# NOTE: Variables set in here will activate only in a staging environment
-# export EXAMPLE_VAR="Hello from staging"
-""" + api_block + """
+
 # Number of tasks in an ECS Service
 export MIN_COUNT={min_count}
 export MAX_COUNT={max_count}
@@ -464,21 +430,20 @@ export MAX_COUNT={max_count}
     print("Wrote config.staging")
 
 
-def write_config_prod(args: argparse.Namespace) -> None:
+def write_config_prod(args):
     api_root = getattr(args, "api_root_domain", "") or "example.com"
     api_prod = getattr(args, "api_domain_prod", "") or "api.example.com"
-    api_block = """
+    content = """\
+# NOTE: Variables set in here will activate only in a production environment
+# export EXAMPLE_VAR="Hello from production"
+
 ####################################################################################################
-# API Service Configuration
-# * You only need these if you are running your project as a service api
-# * NOTE: The root domain MUST already exist in Route53 in your AWS account for this to work
+# API Service Configuration (only needed for app type 'api')
+# * The root domain MUST already exist in Route53 in your AWS account
 ####################################################################################################
 export API_ROOT_DOMAIN={api_root_domain}
 export API_DOMAIN={api_domain_prod}
-"""
-    content = """# NOTE: Variables set in here will activate only in a production environment
-# export EXAMPLE_VAR="Hello from production"
-""" + api_block + """
+
 # Number of tasks in an ECS Service
 export MIN_COUNT={min_count}
 export MAX_COUNT={max_count}
@@ -493,8 +458,10 @@ export MAX_COUNT={max_count}
     print("Wrote config.prod")
 
 
-def apply_go_mod_module(app_name: str) -> None:
-    """Set go.mod module line to match APP_IDENT_WITHOUT_ENV (app_name)."""
+# ---------------------------------------------------------------------------
+# Project-specific: Go module & main.go
+# ---------------------------------------------------------------------------
+def apply_go_mod_module(app_name):
     if not app_name or not os.path.isfile(GO_MOD_PATH):
         return
     with open(GO_MOD_PATH, "r", encoding="utf-8") as f:
@@ -508,148 +475,142 @@ def apply_go_mod_module(app_name: str) -> None:
     print("Updated go.mod module to {}".format(app_name))
 
 
-def apply_main_go_for_trigger(trigger_type: str) -> None:
-    """Enable Fiber API or EventBridge main.go so deployed app matches trigger_type."""
+def apply_main_go(app_type):
     if not os.path.isfile(MAIN_GO_PATH):
         return
-    content = MAIN_GO_FIBER if trigger_type == "ecs_api_service" else MAIN_GO_EVENTBRIDGE
+    content = MAIN_GO_API if app_type == "api" else MAIN_GO_TASK
     with open(MAIN_GO_PATH, "w", encoding="utf-8") as f:
         f.write(content)
-    if trigger_type == "ecs_api_service":
+    if app_type == "api":
         print("Enabled Fiber API in cmd/app/main.go (/:8080, /healthcheck for ALB)")
     else:
-        print("Enabled EventBridge/scheduled main in cmd/app/main.go")
+        print("Enabled task main in cmd/app/main.go")
 
 
-def prompt(msg: str, default: str = "") -> str:
-    if default:
-        s = input("{} [{}]: ".format(msg, default)).strip()
-        return s if s else default
-    while True:
-        s = input("{}: ".format(msg)).strip()
-        if s:
-            return s
+# ---------------------------------------------------------------------------
+# Interactive prompts
+# ---------------------------------------------------------------------------
+def _prompt_common(args, current, discovered):
+    """Prompt for fields shared across all ECS project types."""
+    eff_role = _effective(current, "aws_role_arn", _is_placeholder_role)
+    eff_bucket = _effective(current, "terraform_state_bucket", _is_placeholder_bucket)
+
+    if not args.aws_role_arn:
+        if eff_role:
+            args.aws_role_arn = eff_role
+        elif discovered["oidc_roles"]:
+            args.aws_role_arn = _choose_from_list("OIDC role (GitHub Actions):", discovered["oidc_roles"])
+        else:
+            args.aws_role_arn = prompt("OIDC role ARN", eff_role)
+
+    if not args.terraform_state_bucket:
+        if eff_bucket:
+            args.terraform_state_bucket = eff_bucket
+        elif discovered["terraform_buckets"]:
+            args.terraform_state_bucket = _choose_from_list("Terraform state bucket:", discovered["terraform_buckets"])
+        else:
+            args.terraform_state_bucket = prompt("Terraform state bucket", eff_bucket)
+
+    if not args.app_name:
+        args.app_name = prompt("App name (APP_IDENT_WITHOUT_ENV, max 20 chars)", current.get("app_name", ""))
+    if not args.app_type:
+        default_type = current.get("app_type", "scheduled")
+        args.app_type = prompt("App type ({})".format(" | ".join(APP_TYPES)), default_type)
+        if args.app_type not in APP_TYPES:
+            print("Invalid app type '{}'. Defaulting to 'scheduled'.".format(args.app_type), file=sys.stderr)
+            args.app_type = "scheduled"
+
+    for attr, default in [
+        ("app_cpu", current.get("app_cpu", "256")),
+        ("app_memory", current.get("app_memory", "512")),
+        ("launch_type", current.get("launch_type", "FARGATE")),
+        ("cpu_architecture", current.get("cpu_architecture", "X86_64")),
+        ("aws_region", current.get("aws_region", "us-west-2")),
+    ]:
+        if not getattr(args, attr):
+            setattr(args, attr, default)
+
+    if args.app_type == "api":
+        if not args.api_root_domain and discovered["route53_domains"]:
+            args.api_root_domain = _choose_from_list("API root domain (Route53):", discovered["route53_domains"])
+        if not args.api_root_domain:
+            args.api_root_domain = prompt("API root domain (must exist in Route53)", current.get("api_root_domain", "example.com"))
+        if not args.api_domain_staging:
+            args.api_domain_staging = prompt("API domain for staging", current.get("api_domain_staging", "api-staging." + args.api_root_domain))
+        if not args.api_domain_prod:
+            args.api_domain_prod = prompt("API domain for prod", current.get("api_domain_prod", "api." + args.api_root_domain))
+
+    for attr, fallback in [("min_count", "1"), ("max_count_staging", "2"), ("max_count_prod", "2"), ("vpc_name", "")]:
+        if not getattr(args, attr, ""):
+            setattr(args, attr, current.get(attr, fallback))
 
 
-def main() -> int:
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+def main():
     parser = argparse.ArgumentParser(
-        description="Configure this AWS ECS project for app type and AWS.",
+        description="Configure this AWS ECS (Go) project.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "--app-type",
-        choices=APP_TYPES,
-        help="App type: ecs_api_service (ALB+service), ecs_background_service, ecs_eventbridge (scheduled)",
-    )
+    parser.add_argument("--app-type", choices=APP_TYPES, help="api | background_service | scheduled")
     parser.add_argument("--app-name", default="", help="APP_IDENT_WITHOUT_ENV (max 20 chars)")
     parser.add_argument("--terraform-state-bucket", default="", help="S3 bucket for Terraform state")
     parser.add_argument("--aws-region", default="us-west-2", help="AWS region")
-    parser.add_argument("--aws-role-arn", default="", help="OIDC deployment role ARN for CI/CD")
-    parser.add_argument("--app-cpu", default="256", help="ECS task CPU units (256,512,1024,...)")
+    parser.add_argument("--aws-role-arn", default="", help="OIDC deployment role ARN")
+    parser.add_argument("--app-cpu", default="256", help="ECS task CPU units")
     parser.add_argument("--app-memory", default="512", help="ECS task memory MB")
     parser.add_argument("--launch-type", default="FARGATE", choices=("FARGATE", "FARGATE_SPOT", "EC2"))
     parser.add_argument("--cpu-architecture", default="X86_64", choices=("X86_64", "ARM64"))
     parser.add_argument("--vpc-name", default="", help="Optional VPC tag:Name")
-    parser.add_argument("--api-root-domain", default="", help="Root domain for API (ecs_api_service only)")
+    parser.add_argument("--api-root-domain", default="", help="Root domain for API (api type only)")
     parser.add_argument("--api-domain-staging", default="", help="API domain for staging")
     parser.add_argument("--api-domain-prod", default="", help="API domain for prod")
     parser.add_argument("--min-count", default="1", help="MIN_COUNT for ECS service")
-    parser.add_argument("--max-count-staging", default="2", help="MAX_COUNT for staging")
-    parser.add_argument("--max-count-prod", default="2", help="MAX_COUNT for prod")
+    parser.add_argument("--max-count-staging", default="2", help="MAX_COUNT staging")
+    parser.add_argument("--max-count-prod", default="2", help="MAX_COUNT prod")
     parser.add_argument("--non-interactive", action="store_true", help="Fail if required args missing")
     args = parser.parse_args()
 
+    current = read_current_config()
+
     if not args.non_interactive:
-        print("AWS credentials (used to discover Terraform bucket, OIDC role, etc.)")
         prompt_for_aws_credentials()
     ensure_aws_credentials()
-    current = read_current_config()
-    region = args.aws_region or current.get("aws_region", "us-west-2")
 
+    region = args.aws_region or current.get("aws_region", "us-west-2")
     discovered = discover_aws_resources(region)
     if discovered["oidc_roles"] or discovered["terraform_buckets"] or discovered["route53_domains"]:
         print("Discovered AWS resources (you can select by number or enter manually).")
 
-    if not args.non_interactive:
-        effective_role = _effective_current(current, "aws_role_arn", _is_placeholder_role)
-        effective_bucket = _effective_current(current, "terraform_state_bucket", _is_placeholder_bucket)
-        if not args.aws_role_arn and effective_role:
-            args.aws_role_arn = effective_role
-        if not args.aws_role_arn and discovered["oidc_roles"]:
-            args.aws_role_arn = _choose_from_list("OIDC role (GitHub Actions):", discovered["oidc_roles"])
-        elif not args.aws_role_arn:
-            args.aws_role_arn = prompt("OIDC role ARN", effective_role)
-
-        if not args.terraform_state_bucket and effective_bucket:
-            args.terraform_state_bucket = effective_bucket
-        if not args.terraform_state_bucket and discovered["terraform_buckets"]:
-            args.terraform_state_bucket = _choose_from_list("Terraform state bucket:", discovered["terraform_buckets"])
-        elif not args.terraform_state_bucket:
-            args.terraform_state_bucket = prompt("Terraform state bucket", effective_bucket)
-
-        if not args.app_name:
-            args.app_name = prompt("App name (APP_IDENT_WITHOUT_ENV, max 20 chars)", current.get("app_name", ""))
-        if not args.app_type:
-            args.app_type = prompt("App type (ecs_api_service | ecs_background_service | ecs_eventbridge)", current.get("trigger_type", "ecs_eventbridge"))
-            if args.app_type not in APP_TYPES:
-                args.app_type = "ecs_eventbridge"
-
-        for attr, default in [
-            ("app_cpu", current.get("app_cpu", "256")),
-            ("app_memory", current.get("app_memory", "512")),
-            ("launch_type", current.get("launch_type", "FARGATE")),
-            ("cpu_architecture", current.get("cpu_architecture", "X86_64")),
-            ("aws_region", current.get("aws_region", "us-west-2")),
-        ]:
-            if not getattr(args, attr):
-                setattr(args, attr, default)
-
-        if args.app_type == "ecs_api_service":
-            if not args.api_root_domain and discovered["route53_domains"]:
-                args.api_root_domain = _choose_from_list("API root domain (Route53):", discovered["route53_domains"])
-            if not args.api_root_domain:
-                args.api_root_domain = prompt("API root domain (must exist in Route53)", current.get("api_root_domain", "example.com"))
-            if not args.api_domain_staging:
-                args.api_domain_staging = prompt("API domain for staging", current.get("api_domain_staging", "api-staging." + args.api_root_domain))
-            if not args.api_domain_prod:
-                args.api_domain_prod = prompt("API domain for prod", current.get("api_domain_prod", "api." + args.api_root_domain))
-
-        if not getattr(args, "min_count", ""):
-            args.min_count = current.get("min_count", "1")
-        if not getattr(args, "max_count_staging", ""):
-            args.max_count_staging = current.get("max_count_staging", "2")
-        if not getattr(args, "max_count_prod", ""):
-            args.max_count_prod = current.get("max_count_prod", "2")
-        if not getattr(args, "vpc_name", ""):
-            args.vpc_name = current.get("vpc_name", "")
-    else:
-        required = [("app_name", "App name"), ("terraform_state_bucket", "Terraform state bucket"), ("aws_role_arn", "OIDC role ARN")]
-        for attr, desc in required:
+    if args.non_interactive:
+        for attr, desc in [("app_name", "App name"), ("terraform_state_bucket", "Terraform state bucket"), ("aws_role_arn", "OIDC role ARN")]:
             if not getattr(args, attr):
                 print("Error: {} required. Set --{} or run without --non-interactive.".format(desc, attr.replace("_", "-")), file=sys.stderr)
                 return 1
         if not args.app_type:
-            args.app_type = current.get("trigger_type", "ecs_eventbridge")
+            args.app_type = current.get("app_type", "scheduled")
         if args.app_type not in APP_TYPES:
-            args.app_type = "ecs_eventbridge"
+            args.app_type = "scheduled"
         defaults = {"app_cpu": "256", "app_memory": "512", "launch_type": "FARGATE", "cpu_architecture": "X86_64"}
-        for attr in ("app_cpu", "app_memory", "launch_type", "cpu_architecture"):
+        for attr, default in defaults.items():
             if not getattr(args, attr):
-                setattr(args, attr, current.get(attr, defaults.get(attr)))
-        if args.app_type == "ecs_api_service":
+                setattr(args, attr, current.get(attr, default))
+        if args.app_type == "api":
             args.api_root_domain = args.api_root_domain or current.get("api_root_domain", "example.com")
             args.api_domain_staging = args.api_domain_staging or current.get("api_domain_staging", "api-staging.example.com")
             args.api_domain_prod = args.api_domain_prod or current.get("api_domain_prod", "api.example.com")
-        args.min_count = getattr(args, "min_count", None) or "1"
-        args.max_count_staging = getattr(args, "max_count_staging", None) or "2"
-        args.max_count_prod = getattr(args, "max_count_prod", None) or "2"
-        args.vpc_name = getattr(args, "vpc_name", None) or ""
+        for attr, fallback in [("min_count", "1"), ("max_count_staging", "2"), ("max_count_prod", "2"), ("vpc_name", "")]:
+            if not getattr(args, attr, ""):
+                setattr(args, attr, current.get(attr, fallback))
+    else:
+        _prompt_common(args, current, discovered)
 
     write_config_global(args)
     write_config_staging(args)
     write_config_prod(args)
     apply_go_mod_module(args.app_name)
-    apply_main_go_for_trigger(args.app_type)
+    apply_main_go(args.app_type)
     print("Setup complete. Edit config.global (and config.staging/config.prod) if needed, then deploy.")
     return 0
 
