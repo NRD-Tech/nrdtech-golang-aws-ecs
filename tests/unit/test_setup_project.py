@@ -110,7 +110,7 @@ def test_non_interactive_full_run_writes_configs(tmp_path, monkeypatch):
     cmd_dir = tmp_path / "cmd" / "app"
     cmd_dir.mkdir(parents=True)
     (cmd_dir / "main.go").write_text("package main\nfunc main() {}\n")
-    (tmp_path / "go.mod").write_text("module old-name\ngo 1.24.3\n")
+    (tmp_path / "go.mod").write_text("module old-name\ngo 1.26\n")
 
     # Patch paths
     monkeypatch.setattr(setup_project, "SCRIPT_DIR", str(tmp_path))
@@ -163,7 +163,7 @@ def test_non_interactive_scheduled_type(tmp_path, monkeypatch):
     cmd_dir = tmp_path / "cmd" / "app"
     cmd_dir.mkdir(parents=True)
     (cmd_dir / "main.go").write_text("package main\nfunc main() {}\n")
-    (tmp_path / "go.mod").write_text("module old-name\ngo 1.24.3\n")
+    (tmp_path / "go.mod").write_text("module old-name\ngo 1.26\n")
 
     monkeypatch.setattr(setup_project, "SCRIPT_DIR", str(tmp_path))
     monkeypatch.setattr(setup_project, "CONFIG_GLOBAL", str(tmp_path / "config.global"))

@@ -6,7 +6,7 @@ For a **detailed workflow and concept guide** (ECS, tasks, task definition, IAM,
 
 # Technology Stack
 
-- Golang 1.24.3
+- Golang 1.26
 - Docker
 - Terraform
 
