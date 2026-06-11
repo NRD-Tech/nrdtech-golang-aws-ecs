@@ -50,7 +50,7 @@ def test_app_types_and_trigger_map_consistent():
 
 
 def test_ecs_app_types():
-    assert setup_project.APP_TYPES == ("api", "background_service", "scheduled")
+    assert setup_project.APP_TYPES == ("api", "internal_api", "background_service", "scheduled")
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +154,47 @@ def test_non_interactive_full_run_writes_configs(tmp_path, monkeypatch):
     # Verify main.go has Fiber content (api type)
     main_go = (cmd_dir / "main.go").read_text()
     assert "fiber" in main_go.lower() or "Fiber" in main_go
+
+
+def test_non_interactive_internal_api_type(tmp_path, monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+
+    cmd_dir = tmp_path / "cmd" / "app"
+    cmd_dir.mkdir(parents=True)
+    (cmd_dir / "main.go").write_text("package main\nfunc main() {}\n")
+    (tmp_path / "go.mod").write_text("module old-name\ngo 1.26\n")
+
+    monkeypatch.setattr(setup_project, "SCRIPT_DIR", str(tmp_path))
+    monkeypatch.setattr(setup_project, "CONFIG_GLOBAL", str(tmp_path / "config.global"))
+    monkeypatch.setattr(setup_project, "CONFIG_STAGING", str(tmp_path / "config.staging"))
+    monkeypatch.setattr(setup_project, "CONFIG_PROD", str(tmp_path / "config.prod"))
+    monkeypatch.setattr(setup_project, "MAIN_GO_PATH", str(cmd_dir / "main.go"))
+    monkeypatch.setattr(setup_project, "GO_MOD_PATH", str(tmp_path / "go.mod"))
+
+    orig = sys.argv
+    try:
+        sys.argv = [
+            "setup.py", "--non-interactive",
+            "--app-type", "internal_api",
+            "--app-name", "internal-app",
+            "--terraform-state-bucket", "my-bucket",
+            "--aws-role-arn", "arn:aws:iam::999:role/test",
+        ]
+        result = setup_project.main()
+        assert result == 0
+    finally:
+        sys.argv = orig
+
+    global_text = (tmp_path / "config.global").read_text()
+    assert "export trigger_type=ecs_internal_api_service" in global_text
+
+    staging_text = (tmp_path / "config.staging").read_text()
+    assert "API_ROOT_DOMAIN" in staging_text
+
+    # Internal API uses the same HTTP app template as the public API
+    main_go = (cmd_dir / "main.go").read_text()
+    assert "fiber" in main_go.lower()
 
 
 def test_non_interactive_scheduled_type(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Setup for AWS ECS (Go) template.
-Configures app type (api | background_service | scheduled),
+Configures app type (api | internal_api | background_service | scheduled),
 config.global / config.staging / config.prod, and Go source files.
 Auto-discovers OIDC role, Terraform state bucket, and Route53 domains.
 
@@ -24,10 +24,11 @@ CONFIG_PROD = os.path.join(SCRIPT_DIR, "config.prod")
 MAIN_GO_PATH = os.path.join(SCRIPT_DIR, "cmd", "app", "main.go")
 GO_MOD_PATH = os.path.join(SCRIPT_DIR, "go.mod")
 
-APP_TYPES = ("api", "background_service", "scheduled")
+APP_TYPES = ("api", "internal_api", "background_service", "scheduled")
 
 TRIGGER_TYPE_MAP = {
     "api": "ecs_api_service",
+    "internal_api": "ecs_internal_api_service",
     "background_service": "ecs_background_service",
     "scheduled": "ecs_eventbridge",
 }
@@ -372,7 +373,7 @@ export LAUNCH_TYPE={launch_type}
 # NOTE2: Only GitHub supports ARM64 builds - Bitbucket doesn't
 export CPU_ARCHITECTURE={cpu_architecture}
 
-# ECS trigger type: ecs_api_service | ecs_background_service | ecs_eventbridge
+# ECS trigger type: ecs_api_service | ecs_internal_api_service | ecs_background_service | ecs_eventbridge
 export trigger_type={trigger_type}
 
 # Optional: set VPC_NAME to a tag:Name value to use a custom VPC; leave unset for default VPC
@@ -409,6 +410,9 @@ def write_config_staging(args):
 # NOTE: Variables set in here will activate only in a staging environment
 # export EXAMPLE_VAR="Hello from staging"
 
+# Optional: per-environment VPC override (tag:Name); most clients use default VPC or config.global
+# export VPC_NAME=Dev
+
 ####################################################################################################
 # API Service Configuration (only needed for app type 'api')
 # * The root domain MUST already exist in Route53 in your AWS account
@@ -436,6 +440,9 @@ def write_config_prod(args):
     content = """\
 # NOTE: Variables set in here will activate only in a production environment
 # export EXAMPLE_VAR="Hello from production"
+
+# Optional: per-environment VPC override (tag:Name); most clients use default VPC or config.global
+# export VPC_NAME=Prod
 
 ####################################################################################################
 # API Service Configuration (only needed for app type 'api')
@@ -478,13 +485,31 @@ def apply_go_mod_module(app_name):
 def apply_main_go(app_type):
     if not os.path.isfile(MAIN_GO_PATH):
         return
-    content = MAIN_GO_API if app_type == "api" else MAIN_GO_TASK
+    content = MAIN_GO_API if app_type in ("api", "internal_api") else MAIN_GO_TASK
     with open(MAIN_GO_PATH, "w", encoding="utf-8") as f:
         f.write(content)
-    if app_type == "api":
+    if app_type in ("api", "internal_api"):
         print("Enabled Fiber API in cmd/app/main.go (/:8080, /healthcheck for ALB)")
+        _sync_go_module()
     else:
         print("Enabled task main in cmd/app/main.go")
+
+
+def _sync_go_module():
+    """Resolve imports in go.mod/go.sum after main.go changes."""
+    try:
+        subprocess.run(
+            ["go", "mod", "tidy"],
+            cwd=SCRIPT_DIR,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        print("Updated go.mod and go.sum")
+    except FileNotFoundError:
+        print("Warning: go not found; run 'go mod tidy' manually.", file=sys.stderr)
+    except subprocess.CalledProcessError as e:
+        print("Warning: go mod tidy failed: {}".format(e.stderr or e), file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +555,7 @@ def _prompt_common(args, current, discovered):
         if not getattr(args, attr):
             setattr(args, attr, default)
 
-    if args.app_type == "api":
+    if args.app_type in ("api", "internal_api"):
         if not args.api_root_domain and discovered["route53_domains"]:
             args.api_root_domain = _choose_from_list("API root domain (Route53):", discovered["route53_domains"])
         if not args.api_root_domain:
@@ -553,7 +578,7 @@ def main():
         description="Configure this AWS ECS (Go) project.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--app-type", choices=APP_TYPES, help="api | background_service | scheduled")
+    parser.add_argument("--app-type", choices=APP_TYPES, help="api | internal_api | background_service | scheduled")
     parser.add_argument("--app-name", default="", help="APP_IDENT_WITHOUT_ENV (max 20 chars)")
     parser.add_argument("--terraform-state-bucket", default="", help="S3 bucket for Terraform state")
     parser.add_argument("--aws-region", default="us-west-2", help="AWS region")
@@ -596,7 +621,7 @@ def main():
         for attr, default in defaults.items():
             if not getattr(args, attr):
                 setattr(args, attr, current.get(attr, default))
-        if args.app_type == "api":
+        if args.app_type in ("api", "internal_api"):
             args.api_root_domain = args.api_root_domain or current.get("api_root_domain", "example.com")
             args.api_domain_staging = args.api_domain_staging or current.get("api_domain_staging", "api-staging.example.com")
             args.api_domain_prod = args.api_domain_prod or current.get("api_domain_prod", "api.example.com")

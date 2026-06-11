@@ -23,7 +23,7 @@ locals {
     launch_type                = "FARGATE"
     capacity_provider_strategy = []
     network_configuration = {
-      subnets          = data.aws_subnets.public.ids
+      subnets          = local.public_subnets_or_all
       assign_public_ip = true
     }
   } : var.LAUNCH_TYPE == "FARGATE_SPOT" ? {
@@ -34,7 +34,7 @@ locals {
       weight            = 1
     }]
     network_configuration = {
-      subnets          = data.aws_subnets.public.ids
+      subnets          = local.public_subnets_or_all
       assign_public_ip = true
     }
   } : {

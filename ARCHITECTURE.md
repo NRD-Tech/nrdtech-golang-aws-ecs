@@ -13,13 +13,13 @@ This document explains the codebase with workflow diagrams, step-by-step flows, 
 - **Cluster**: A logical grouping of capacity (Fargate or EC2) and the place where **tasks** and **services** run. This project creates one cluster per app (e.g. `my-test-project-staging`).
 - **Task definition**: A blueprint for a runnable unit. It specifies image, CPU/memory, IAM roles, logging, env vars, and ports. It does **not** run by itself.
 - **Task**: A single **running** instance of a task definition. ECS starts a task when something asks it to (e.g. EventBridge rule or an ECS service keeping N tasks running).
-- **Service** (optional): Keeps a desired number of tasks running in a cluster, restarts them if they fail, and can attach to a load balancer. Used only when `trigger_type = "ecs_api_service"`.
+- **Service** (optional): Keeps a desired number of tasks running in a cluster, restarts them if they fail, and can attach to a load balancer. Used when `trigger_type = "ecs_api_service"` or `"ecs_internal_api_service"`.
 
 So: **Cluster** contains **Tasks** (and optionally an **ECS Service**). Each task is one instance of a **Task definition**.
 
 ### 1.2 Where the ECS service Terraform resource fits
 
-The **`aws_ecs_service`** Terraform resource (`aws_ecs_service.ecs_service` in `terraform/main/ecs_api_service.tf`) is the ECS **Service** in this architecture. It is created **only when `trigger_type = "ecs_api_service"`**.
+The **`aws_ecs_service`** Terraform resource (`aws_ecs_service.ecs_service` in `terraform/main/ecs_api_service.tf`) is the ECS **Service** in this architecture. It is created **only when `trigger_type = "ecs_api_service"` or `"ecs_internal_api_service"`** (the latter uses an internal ALB in private subnets).
 
 - **Placement in the hierarchy**:  
   **Cluster** → **ECS Service** (this Terraform resource) → **Tasks**.  
@@ -358,6 +358,8 @@ flowchart LR
 | `terraform/main/ecr.tf` | ECR repo, lifecycle policy, `null_resource.push_image` (build + push). |
 | `terraform/main/cloudwatch_log.tf` | Log group for app logs; Container Insights log group + IAM. |
 | `terraform/main/ecs_eventbridge.tf` | EventBridge rule, target (ECS), DLQ, IAM role for Events (only if `trigger_type = ecs_eventbridge`). |
-| `terraform/main/ecs_api_service.tf` | Security groups, ALB, target group, ECS service, auto scaling, listeners, optional HTTPS/Route53 (only if `trigger_type = ecs_api_service`). |
+| `terraform/main/ecs_api_service.tf` | Security groups, ALB, target group, ECS service, auto scaling, listeners, optional HTTPS/Route53 (only if `trigger_type = ecs_api_service` or `ecs_internal_api_service`; internal mode uses an internal ALB in private subnets). |
+| `terraform/main/ecs_background_service.tf` | Security group + ECS service with no ALB (only if `trigger_type = ecs_background_service`). |
+| `terraform/main/cloudwatch_alarm.tf` | Optional prod-only failed-task alarm + SNS topic for API service triggers. |
 
 Together, this gives you the deployment workflow, the two runtime workflows, and how ECS, tasks, and dependencies fit into the codebase.

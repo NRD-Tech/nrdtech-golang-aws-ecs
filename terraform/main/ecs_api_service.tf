@@ -1,8 +1,17 @@
-# API service trigger (ALB + ECS service) - active when trigger_type = "ecs_api_service"
-# Set API_DOMAIN and API_ROOT_DOMAIN in config.<env> when using this trigger.
+# API service trigger (ALB + ECS service) - active when trigger_type is:
+#   ecs_api_service          - public ALB (internet-facing)
+#   ecs_internal_api_service - internal ALB, reachable only from inside the VPC (service-to-service)
+# Set API_DOMAIN and API_ROOT_DOMAIN in config.<env> when using a custom domain + HTTPS.
 
 locals {
-  ecs_api_service_enabled = var.trigger_type == "ecs_api_service"
+  ecs_api_service_enabled = contains(["ecs_api_service", "ecs_internal_api_service"], var.trigger_type)
+  api_internal            = var.trigger_type == "ecs_internal_api_service"
+
+  # Internal mode places the ALB and tasks in private subnets; public mode uses public
+  # subnets. Both fall back to all VPC subnets when none match (see main.tf locals).
+  api_private_subnets_exist = length(data.aws_subnets.private.ids) > 0
+  api_subnets               = local.api_internal ? local.private_subnets_or_all : local.public_subnets_or_all
+  api_alb_ingress_cidrs     = local.api_internal ? [local.vpc_cidr] : ["0.0.0.0/0"]
 
   api_fargate_strategy = tolist([{ capacity_provider = "FARGATE", weight = 1 }])
   api_fargate_spot_strategy = tolist([
@@ -11,7 +20,7 @@ locals {
   ])
   api_ec2_strategy = tolist([{ capacity_provider = "EC2", weight = 1 }])
 
-  api_ecs_target = var.trigger_type == "ecs_api_service" ? {
+  api_ecs_target = local.ecs_api_service_enabled ? {
     capacity_provider_strategy = (
       var.LAUNCH_TYPE == "FARGATE" ? local.api_fargate_strategy :
       var.LAUNCH_TYPE == "FARGATE_SPOT" ? local.api_fargate_spot_strategy :
@@ -21,12 +30,13 @@ locals {
       var.LAUNCH_TYPE == "FARGATE" || var.LAUNCH_TYPE == "FARGATE_SPOT"
         ? {
             security_groups  = [aws_security_group.ecs_sg[0].id]
-            subnets          = data.aws_subnets.public.ids
-            assign_public_ip = true
+            subnets          = local.api_subnets
+            # Tasks in subnets without a NAT path still need a public IP to pull from ECR.
+            assign_public_ip = local.api_internal ? !local.api_private_subnets_exist : true
           }
         : {
             security_groups  = [aws_security_group.ecs_sg[0].id]
-            subnets          = data.aws_subnets.public.ids
+            subnets          = local.api_subnets
             assign_public_ip = false
           }
     )
@@ -34,7 +44,7 @@ locals {
 }
 
 locals {
-  api_cluster_name = var.trigger_type == "ecs_api_service" ? element(split("/", aws_ecs_cluster.ecs.arn), 1) : ""
+  api_cluster_name = local.ecs_api_service_enabled ? element(split("/", aws_ecs_cluster.ecs.arn), 1) : ""
 }
 
 data "aws_route53_zone" "api_domain" {
@@ -50,11 +60,25 @@ resource "aws_security_group" "ecs_sg" {
   name   = "${var.APP_IDENT}-ecs-sg"
   vpc_id = local.vpc_id
 
-  ingress {
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+  # Public API keeps the historically open app port; internal API admits only the ALB.
+  dynamic "ingress" {
+    for_each = local.api_internal ? [] : [1]
+    content {
+      from_port   = 8080
+      to_port     = 8080
+      protocol    = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+
+  dynamic "ingress" {
+    for_each = local.api_internal ? [1] : []
+    content {
+      from_port       = 8080
+      to_port         = 8080
+      protocol        = "tcp"
+      security_groups = [aws_security_group.alb_sg[0].id]
+    }
   }
 
   egress {
@@ -75,14 +99,14 @@ resource "aws_security_group" "alb_sg" {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = local.api_alb_ingress_cidrs
   }
 
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = local.api_alb_ingress_cidrs
   }
 
   egress {
@@ -97,10 +121,10 @@ resource "aws_lb" "ecs_alb" {
   count = local.ecs_api_service_enabled ? 1 : 0
 
   name               = "${var.APP_IDENT}-alb"
-  internal           = false
+  internal           = local.api_internal
   load_balancer_type = "application"
   security_groups    = [aws_security_group.alb_sg[0].id]
-  subnets            = data.aws_subnets.public.ids
+  subnets            = local.api_subnets
 
   enable_deletion_protection = false
   enable_http2               = true

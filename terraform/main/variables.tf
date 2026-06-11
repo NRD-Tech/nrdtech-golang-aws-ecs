@@ -60,17 +60,17 @@ variable "VPC_NAME" {
 }
 
 ##################################################
-# Trigger type: ecs_eventbridge or ecs_api_service.
+# Trigger type: ecs_eventbridge, ecs_api_service, ecs_internal_api_service, or ecs_background_service.
 # Switching triggers uses a two-phase apply to avoid cycles.
 ##################################################
 variable "trigger_type" {
-  description = "ECS trigger: ecs_eventbridge (scheduled) or ecs_api_service (ALB + service). Set in config.global / config.<env>. Use 'none' only for internal two-phase apply."
+  description = "ECS trigger: ecs_eventbridge (scheduled), ecs_api_service (public ALB + service), ecs_internal_api_service (internal ALB + service, VPC-only), or ecs_background_service (service, no ALB). Set in config.global / config.<env>. Use 'none' only for internal two-phase apply."
   type        = string
   default     = "ecs_eventbridge"
 }
 
 ##################################################
-# API service variables (only when trigger_type = ecs_api_service)
+# API service variables (only when trigger_type = ecs_api_service / ecs_internal_api_service)
 ##################################################
 variable "API_DOMAIN" {
   type    = string

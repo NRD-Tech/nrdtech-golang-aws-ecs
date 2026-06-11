@@ -1,6 +1,6 @@
 # Golang AWS ECS App
 
-Template for a Golang application running on AWS ECS. The app can be run in one of two modes, selected by **trigger_type**: scheduled runs via EventBridge or an always-on API behind an Application Load Balancer.
+Template for a Golang application running on AWS ECS. The app mode is selected by **trigger_type**: scheduled runs via EventBridge, an always-on API behind a public Application Load Balancer, or an internal API behind an internal ALB for service-to-service calls inside your VPC.
 
 For a **detailed workflow and concept guide** (ECS, tasks, task definition, IAM, deployment and runtime flows with diagrams), see **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 
@@ -30,14 +30,22 @@ For a **detailed workflow and concept guide** (ECS, tasks, task definition, IAM,
 - **Resources:** ECS service (desired count ≥ 1), Application Load Balancer, target group, security groups (ECS + ALB), optional auto-scaling. Optionally: ACM certificate, Route53 record, HTTPS listener when `API_DOMAIN` / `API_ROOT_DOMAIN` are set.
 - **Behaviour:** ALB forwards traffic to the ECS service; tasks listen on port 8080 (e.g. `/healthcheck` for ALB health checks).
 
+## Trigger: Internal API service (internal ALB) — `trigger_type = "ecs_internal_api_service"`
+
+- **Use case:** Internal/service-to-service HTTP API called by other workloads (ECS, EC2, VPC-attached Lambda) inside the VPC; not reachable from the internet.
+- **Resources:** Same as the API service, but the ALB is **internal** and placed in private subnets (falls back to all VPC subnets on the default VPC), ALB ingress is restricted to the VPC CIDR, and the app port (8080) only accepts traffic from the ALB security group.
+- **Behaviour:** Callers inside the VPC use the ALB DNS name (Terraform output `api_base_url`) or the optional custom domain (`API_DOMAIN`; the Route53 record resolves to private IPs). For production use set `VPC_NAME` to a VPC with subnets tagged `*private*` and a NAT path so tasks can pull images without public IPs.
+
 # Trigger type mechanism
 
 - **Variable:** `trigger_type` is set in `config.global` or overridden in `config.<env>` (e.g. `config.staging`, `config.prod`). Valid values:
   - `ecs_eventbridge` — EventBridge schedule (default).
-  - `ecs_api_service` — ALB + ECS service.
+  - `ecs_api_service` — public ALB + ECS service.
+  - `ecs_internal_api_service` — internal ALB + ECS service (VPC-only).
+  - `ecs_background_service` — ECS service with no ALB (long-running worker; `MIN_COUNT` tasks).
 - **Terraform:** `terraform/main/ecs_eventbridge.tf` and `terraform/main/ecs_api_service.tf` both remain in the repo. Each resource uses `count` or a local (e.g. `local.ecs_eventbridge_enabled`, `local.ecs_api_service_enabled`) so that only the chosen trigger's resources are created.
 - **Switching triggers:** Change `trigger_type` in config and re-deploy. If Terraform reports a cycle (e.g. when moving between trigger types), the apply script runs a **two-phase apply**: it temporarily sets `trigger_type = "none"` (creating neither trigger), applies, then restores your chosen value and applies again. No manual state edits or file uncommenting.
-- **API service options:** When using `ecs_api_service`, set `API_DOMAIN` and `API_ROOT_DOMAIN` in `config.<env>` if you want a custom domain and HTTPS; otherwise the ALB is available by its DNS name on HTTP only.
+- **API service options:** When using `ecs_api_service` or `ecs_internal_api_service`, set `API_DOMAIN` and `API_ROOT_DOMAIN` in `config.<env>` if you want a custom domain and HTTPS; otherwise the ALB is available by its DNS name on HTTP only (for the internal trigger, only from inside the VPC).
 
 # Setting Up Your Development Environment
 
@@ -90,10 +98,10 @@ git commit -m 'init'
     - AWS_DEFAULT_REGION
     - AWS_ROLE_ARN
     - LAUNCH_TYPE — one of EC2, FARGATE, or FARGATE_SPOT (EC2 requires an ECS cluster with an EC2 capacity provider)
-    - **trigger_type** — `ecs_eventbridge` (scheduled) or `ecs_api_service` (ALB + service). See [Architecture](#architecture) and [Trigger type mechanism](#trigger-type-mechanism).
+    - **trigger_type** — `ecs_eventbridge` (scheduled), `ecs_api_service` (public ALB + service), or `ecs_internal_api_service` (internal ALB + service). See [Architecture](#architecture) and [Trigger type mechanism](#trigger-type-mechanism).
   - Optional: set `VPC_NAME` to a VPC tag name for a custom VPC; leave unset for the default VPC.
 - Edit go.mod — set the module name (e.g. same as APP_IDENT_WITHOUT_ENV).
-- For **ecs_eventbridge**: ensure your app and Dockerfile support a short-lived task (run and exit). For **ecs_api_service**: ensure the app exposes HTTP on port 8080 (e.g. `/healthcheck` for the ALB) and add Fiber if needed: `go get github.com/gofiber/fiber/v2`.
+- For **ecs_eventbridge**: ensure your app and Dockerfile support a short-lived task (run and exit). For **ecs_api_service** / **ecs_internal_api_service**: ensure the app exposes HTTP on port 8080 (e.g. `/healthcheck` for the ALB) and add Fiber if needed: `go get github.com/gofiber/fiber/v2`.
 
 * Commit your changes to git
 

@@ -1,6 +1,9 @@
 # NOTE: Variables set in here will activate only in a production environment
 # export EXAMPLE_VAR="Hello from production"
 
+# Optional: per-environment VPC override (tag:Name); most clients use default VPC or config.global
+# export VPC_NAME=Prod
+
 ####################################################################################################
 # API Service Configuration
 # * You only need these if you are running your project as a service api

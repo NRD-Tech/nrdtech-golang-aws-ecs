@@ -43,7 +43,12 @@ data "aws_vpc" "selected_default" {
 }
 
 locals {
-  vpc_id = var.VPC_NAME != "" ? data.aws_vpc.selected[0].id : data.aws_vpc.selected_default[0].id
+  vpc_id   = var.VPC_NAME != "" ? data.aws_vpc.selected[0].id : data.aws_vpc.selected_default[0].id
+  vpc_cidr = var.VPC_NAME != "" ? data.aws_vpc.selected[0].cidr_block : data.aws_vpc.selected_default[0].cidr_block
+
+  # Subnet selection with fallback for VPCs without tagged subnets (e.g. the default VPC).
+  public_subnets_or_all  = length(data.aws_subnets.public.ids) > 0 ? data.aws_subnets.public.ids : data.aws_subnets.subnets.ids
+  private_subnets_or_all = length(data.aws_subnets.private.ids) > 0 ? data.aws_subnets.private.ids : data.aws_subnets.subnets.ids
 }
 
 data "aws_subnets" "subnets" {
@@ -58,8 +63,8 @@ data "aws_subnets" "public" {
     values = [local.vpc_id]
   }
   filter {
-    name   = "tag:Name"
-    values = ["*public*"]
+    name   = "map-public-ip-on-launch"
+    values = ["true"]
   }
 }
 data "aws_subnets" "private" {
@@ -68,8 +73,8 @@ data "aws_subnets" "private" {
     values = [local.vpc_id]
   }
   filter {
-    name   = "tag:Name"
-    values = ["*private*"]
+    name   = "map-public-ip-on-launch"
+    values = ["false"]
   }
 }
 data "aws_route_tables" "private" {
