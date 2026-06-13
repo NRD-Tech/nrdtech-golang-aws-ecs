@@ -51,16 +51,9 @@ source "config.${ENVIRONMENT}"
 # Export all environment variables to Terraform
 #########################################################
 echo "Exporting all environment variables to Terraform..."
-
-# Use process substitution to avoid subshell
 while IFS='=' read -r var_name var_value; do
-  # Skip variables that already have TF_VAR_ prefix
   if [[ "$var_name" != TF_VAR_* ]]; then
     export "TF_VAR_${var_name}"="${var_value}"
-    escaped_value="${var_value//\'/\'\\\'\'}"
-    echo "Exported TF_VAR_${var_name}='${escaped_value}'"  # Debug log
-  else
-    echo "Skipped ${var_name} (already has TF_VAR_ prefix)"  # Debug log
   fi
 done < <(printenv)
 

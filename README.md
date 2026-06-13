@@ -33,8 +33,8 @@ For a **detailed workflow and concept guide** (ECS, tasks, task definition, IAM,
 ## Trigger: Internal API service (internal ALB) — `trigger_type = "ecs_internal_api_service"`
 
 - **Use case:** Internal/service-to-service HTTP API called by other workloads (ECS, EC2, VPC-attached Lambda) inside the VPC; not reachable from the internet.
-- **Resources:** Same as the API service, but the ALB is **internal** and placed in private subnets (falls back to all VPC subnets on the default VPC), ALB ingress is restricted to the VPC CIDR, and the app port (8080) only accepts traffic from the ALB security group.
-- **Behaviour:** Callers inside the VPC use the ALB DNS name (Terraform output `api_base_url`) or the optional custom domain (`API_DOMAIN`; the Route53 record resolves to private IPs). For production use set `VPC_NAME` to a VPC with subnets tagged `*private*` and a NAT path so tasks can pull images without public IPs.
+- **Resources:** Same as the API service, but the ALB is **internal** and placed in private subnets (no auto-assign public IP; falls back to all VPC subnets on the default VPC), ALB ingress is restricted to the VPC CIDR, and the app port (8080) only accepts traffic from the ALB security group.
+- **Behaviour:** Callers inside the VPC use the ALB DNS name (Terraform output `api_base_url`) or the optional custom domain (`API_DOMAIN`; the Route53 record resolves to private IPs). For production use set `VPC_NAME` to a VPC with private subnets (no auto-assign public IP) and a NAT path so tasks can pull images without public IPs.
 
 # Trigger type mechanism
 

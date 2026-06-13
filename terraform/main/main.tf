@@ -46,7 +46,8 @@ locals {
   vpc_id   = var.VPC_NAME != "" ? data.aws_vpc.selected[0].id : data.aws_vpc.selected_default[0].id
   vpc_cidr = var.VPC_NAME != "" ? data.aws_vpc.selected[0].cidr_block : data.aws_vpc.selected_default[0].cidr_block
 
-  # Subnet selection with fallback for VPCs without tagged subnets (e.g. the default VPC).
+  # Public/private split via map-public-ip-on-launch, with fallback to all subnets when
+  # one side is empty (e.g. the default VPC, where every subnet auto-assigns public IPs).
   public_subnets_or_all  = length(data.aws_subnets.public.ids) > 0 ? data.aws_subnets.public.ids : data.aws_subnets.subnets.ids
   private_subnets_or_all = length(data.aws_subnets.private.ids) > 0 ? data.aws_subnets.private.ids : data.aws_subnets.subnets.ids
 }
