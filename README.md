@@ -8,14 +8,17 @@ For a **detailed workflow and concept guide** (ECS, tasks, task definition, IAM,
 
 - Golang 1.26.5
 - Docker
-- Terraform
+- Terraform (single main stack; state in S3)
+- Tags + AWS Resource Groups for cost/resource grouping
+- GitHub Actions
 
 # Architecture
 
 ## Overview
 
 - **ECS Fargate** (or FARGATE_SPOT / EC2): tasks run in a single ECS cluster. Image is built and pushed to **ECR**; Terraform manages the task definition, cluster, and trigger-specific resources.
-- **Shared resources** (always created): ECS cluster, ECR repository, task definition, task IAM roles, CloudWatch log group.
+- **Shared resources** (always created): ECS cluster, ECR repository, task definition, task IAM roles, CloudWatch log group, Resource Groups (`rg-{repo}-{env}` and optionally `rg-project-{project}-{env}`).
+- **Tags on all resources:** `Environment`, `Repository`, `Project` (for Cost Explorer and Resource Groups).
 - **Trigger-specific resources** are created only when the matching `trigger_type` is set; the other trigger's resources are not created. No Terraform files are commented out—selection is done via the `trigger_type` variable.
 
 ## Trigger: EventBridge (scheduled) — `trigger_type = "ecs_eventbridge"`

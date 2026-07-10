@@ -57,7 +57,9 @@ resource "aws_cloudwatch_event_target" "ecs_target" {
   }
 
   ecs_target {
-    task_definition_arn = local.ecs_target.task_definition_arn
+    task_definition_arn     = local.ecs_target.task_definition_arn
+    enable_ecs_managed_tags = true
+    propagate_tags          = "TASK_DEFINITION"
 
     # Handle launch_type or capacity_provider_strategy
     dynamic "capacity_provider_strategy" {

@@ -1,4 +1,4 @@
-module my-test-project
+module tmpl-go-ecs
 
 go 1.26
 

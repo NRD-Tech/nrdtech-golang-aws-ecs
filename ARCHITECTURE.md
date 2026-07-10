@@ -83,15 +83,10 @@ flowchart TB
     G[_run_terraform_create.sh]
   end
 
-  subgraph bootstrap["Bootstrap (create)"]
-    H[terraform/bootstrap: init + apply]
-    I[App Registry application + app_tags]
-  end
-
   subgraph main["Main (create)"]
-    J[terraform/main: backend + app_bootstrap.tf generated]
+    J[terraform/main: backend.tf generated]
     K[terraform init]
-    L[terraform apply]
+    L[terraform apply — tags + Resource Groups]
     M{Apply cycle?}
     N[Two-phase: trigger_type=none then restore]
   end
@@ -99,7 +94,7 @@ flowchart TB
   A --> B --> C --> D --> E
   E -->|yes| F
   E -->|no| G
-  G --> H --> I --> J --> K --> L --> M
+  G --> J --> K --> L --> M
   M -->|cycle| N --> L
   M -->|ok| end
   M -->|other error| fail
@@ -110,9 +105,8 @@ flowchart TB
 1. **Entry**: You run `ENVIRONMENT=staging ./deploy.sh` (or push to `main` / tag for prod; GitHub runs the same flow with OIDC).
 2. **Config**: `deploy.sh` sources `config.global` and `config.${ENVIRONMENT}` (e.g. `config.staging`), then exports every environment variable as `TF_VAR_<name>` so Terraform receives them as variables.
 3. **Create vs destroy**: If `./deploy.sh -d` was used, it runs `_run_terraform_destroy.sh`; otherwise `_run_terraform_create.sh`.
-4. **Bootstrap**: Script `cd`s to `terraform/bootstrap`, generates `backend.tf`, runs `terraform init` and `terraform apply`. This creates the **App Registry** application and outputs `app_tags`. Those tags are used later so all main resources are tagged for cost tracking.
-5. **Main**: Script `cd`s to `terraform/main`, generates `backend.tf` and `app_bootstrap.tf` (remote state pointing at bootstrap state), runs `terraform init` and `terraform apply`.
-6. **Two-phase apply**: If the first apply fails with a cycle (e.g. when switching `trigger_type`), the script sets `TF_VAR_trigger_type=none`, applies again (drops one trigger’s resources), restores the desired `trigger_type`, and applies a third time.
+4. **Main**: Script `cd`s to `terraform/main`, generates `backend.tf`, runs `terraform init` and `terraform apply`. Provider `default_tags` apply `Environment` / `Repository` / `Project`; Resource Groups `rg-{repo}-{env}` (and optionally `rg-project-{project}-{env}`) are created in the same stack.
+5. **Two-phase apply**: If the first apply fails with a cycle (e.g. when switching `trigger_type`), the script sets `TF_VAR_trigger_type=none`, applies again (drops one trigger’s resources), restores the desired `trigger_type`, and applies a third time.
 
 ---
 
@@ -122,8 +116,8 @@ This diagram shows how the main Terraform resources depend on each other. Option
 
 ```mermaid
 flowchart TB
-  subgraph bootstrap_state["Bootstrap state (remote)"]
-    BS[app_tags]
+  subgraph tags["Tags + Resource Groups"]
+    BS[common_tags + aws_resourcegroups_group]
   end
 
   subgraph shared["Shared resources (always created)"]
@@ -185,7 +179,7 @@ flowchart TB
 
 **Order of creation (simplified):**
 
-1. **Bootstrap**: App Registry → `app_tags`.
+1. **Tags / Resource Groups**: `Environment`, `Repository`, `Project` via provider `default_tags`; `rg-{repo}-{env}` always; optional `rg-project-{project}-{env}`.
 2. **Data**: VPC/subnets (from `main.tf` + `variables.tf`).
 3. **Logs & IAM**: CloudWatch log groups, task execution role, task role, Container Insights policy.
 4. **ECR**: Repository; then `null_resource.push_image` (build + push image with tag = `CODE_HASH_FILE` hash).
@@ -347,11 +341,11 @@ flowchart LR
 | File / area | What it defines |
 |-------------|------------------|
 | `deploy.sh` | Entry: config load, TF_VAR export, call create or destroy script. |
-| `_run_terraform_create.sh` | Bootstrap apply, then main apply; two-phase apply on cycle. |
-| `_run_terraform_destroy.sh` | Main destroy, then bootstrap destroy. |
-| `terraform/bootstrap/main.tf` | App Registry application; outputs `app_tags`. |
-| `terraform/main/main.tf` | Providers, VPC/subnet data sources, `local.vpc_id`. |
-| `terraform/main/variables.tf` | All inputs (e.g. `trigger_type`, `APP_IDENT`, `LAUNCH_TYPE`, `VPC_NAME`). |
+| `_run_terraform_create.sh` | Main apply; two-phase apply on cycle. |
+| `_run_terraform_destroy.sh` | Main destroy. |
+| `terraform/main/tags.tf` | Cost tags + AWS Resource Groups. |
+| `terraform/main/main.tf` | Providers (`default_tags` = `local.common_tags`), VPC/subnet data sources, `local.vpc_id`. |
+| `terraform/main/variables.tf` | All inputs (e.g. `trigger_type`, `APP_IDENT`, `PROJECT_NAME`, `LAUNCH_TYPE`, `VPC_NAME`). |
 | `terraform/main/ecs.tf` | ECS cluster. |
 | `terraform/main/ecs_task.tf` | Task definition (image from ECR + hash, CPU/memory, execution + task role, log group, port 8080). |
 | `terraform/main/ecs_iam.tf` | Task execution role, task role, Container Insights policy. |

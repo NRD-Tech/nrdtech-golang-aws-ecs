@@ -5,12 +5,11 @@
 # export VPC_NAME=Prod
 
 ####################################################################################################
-# API Service Configuration
-# * You only need these if you are running your project as a service api
-# * NOTE: The root domain MUST already exist in Route53 in your AWS account for this to work
+# API Service Configuration (only needed for app type 'api')
+# * The root domain MUST already exist in Route53 in your AWS account
 ####################################################################################################
-export API_ROOT_DOMAIN=mycompany.com
-export API_DOMAIN=api.mycompany.com
+export API_ROOT_DOMAIN=example.com
+export API_DOMAIN=api.example.com
 
 # Number of tasks in an ECS Service
 export MIN_COUNT=1
