@@ -22,14 +22,13 @@ RUN go build -ldflags="-s -w" -o /main ./cmd/app/main.go
 # Stage 2: Create a minimal runtime image
 FROM alpine:latest
 
-# Install certificates (required for HTTPS if your app makes HTTP requests)
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates && \
+    addgroup -S app && adduser -S -G app app
 
-# Copy the statically linked binary from the builder
 COPY --from=builder /main /main
+RUN chown app:app /main
 
-# Expose port
+USER app
+
 EXPOSE 8080
-
-# Set the binary as the container's entry point
 ENTRYPOINT ["/main"]
